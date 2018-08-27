@@ -5,7 +5,7 @@ var Beatmixxxx = {
             _.times(4, function (i) { Beatmixxxx.decks.newDeck(i + 1).setup(); });
         },
 
-        // which deck is on which side, one deck can be on both side at the same time
+        // which deck is on which side, one deck can be on both sides at the same time
         sides: {
             left: {
                 channels: [1, 3],
@@ -15,9 +15,24 @@ var Beatmixxxx = {
                 channels: [2, 4],
                 deck: 2
             },
+
             getAll: function () {
                 return [this.left, this.right];
             }
+        },
+
+        fromGroup: function (group) {
+            return this[group.substring(8, 9)];
+        },
+
+        fromChannel: function (channel) {
+            var deckNumber = _(Beatmixxxx.decks.sides.getAll())
+                .filter(function (side) {
+                    return _.includes(side.channels, channel);
+                })
+                .map("deck")
+                .first();
+            return Beatmixxxx.decks[deckNumber];
         },
 
         newDeck: function (number) {
@@ -29,8 +44,27 @@ var Beatmixxxx = {
                     engine.makeConnection(this.group, control, callback).trigger();
                 },
 
-                isPlaying: function () {
-                    return engine.getValue(this.group, "play");
+                setValue: function (parameter, value) {
+                    if (value === undefined) {
+                        value = true;
+                    }
+                    engine.setValue(this.group, parameter, value);
+                },
+
+                getValue: function (parameter) {
+                    return engine.getValue(this.group, parameter);
+                },
+
+                toggleValue: function (parameter) {
+                    var newValue = !this.getValue(parameter);
+                    this.setValue(parameter, newValue);
+                    return newValue;
+                },
+
+                setLed: function (control, status) {
+                    _.forEach(this.getChannels(), function (channel) {
+                        Beatmixxxx.leds.set(channel, control, status);
+                    });
                 },
 
                 isBraking: function () {
@@ -47,10 +81,6 @@ var Beatmixxxx = {
                 setup: function () {
                 }
             };
-        },
-
-        fromGroup: function (group) {
-            return this[_.parseInt(group.substring(8, 9))];
         }
     },
     midiInput: {
@@ -63,11 +93,7 @@ var Beatmixxxx = {
             this.registerListener({
                 name: "shift",
                 onBinaryInput: function (deck, down) {
-                    // regardless of which shift button was pressed, both send their "on" signals
-                    // we only want to catch one of them, from the left side here (deck 1 or 3)
-                    if (deck.number === 1 || deck.number === 3) {
-                        Beatmixxxx.shifted = down;
-                    }
+                    Beatmixxxx.shifted = down;
                 }
             });
 
@@ -75,18 +101,18 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "cue",
-                onDown: function () {
-
+                onDownShifted: function (deck) {
+                    deck.setValue("start");
                 }
             });
 
             this.registerListener({
                 name: "play",
                 onDownNonShifted: function (deck) {
-                    script.toggleControl(deck.group, "play");
+                    deck.toggleValue("play");
                 },
                 onDownShifted: function (deck) {
-                    if (deck.isPlaying()) {
+                    if (deck.getValue("play")) {
                         engine.brake(deck.number, true);
                     } else {
                         engine.softStart(deck.number, true);
@@ -98,21 +124,21 @@ var Beatmixxxx = {
         registerSimpleButton: function (buttonName, controlName) {
             this.registerListener({
                 name: buttonName,
-                onDown: function (deck) {
-                    engine.setValue(deck.group, controlName, true);
+                onDownNonShifted: function (deck) {
+                    deck.setValue(controlName);
                 },
-                onInput: function (deck, control, value) {
-                    Beatmixxxx.leds.set(deck, control, value)
+                onInputNonShifted: function (deck, control, value) {
+                    deck.setLed(control, value);
                 }
             });
         },
 
         registerListener: function (listener) {
-            this[("control" + _.upperFirst(listener.name))] = function (channel, control, value, status, group) {
-                var deck = Beatmixxxx.decks.fromGroup(group);
+            this[("control" + _.upperFirst(listener.name))] = function (channel, control, value, status, _group) {
+                var deck = Beatmixxxx.decks.fromChannel(channel);
                 var down = (value === Beatmixxxx.midiInput.values.DOWN);
 
-                _.forEach([
+                _([
                     _.defaultTo(listener.onInput, _.noop),
                     Beatmixxxx.shifted ? _.defaultTo(listener.onInputShifted, _.noop) : _.noop,
                     !Beatmixxxx.shifted ? _.defaultTo(listener.onInputNonShifted, _.noop) : _.noop,
@@ -120,7 +146,7 @@ var Beatmixxxx = {
                     _.defaultTo(listener[down ? "onDown" : "onUp"], _.noop),
                     Beatmixxxx.shifted ? _.defaultTo(listener[down ? "onDownShifted" : "onUpShifted"], _.noop) : _.noop,
                     !Beatmixxxx.shifted ? _.defaultTo(listener[down ? "onDownNonShifted" : "onUpNonShifted"], _.noop) : _.noop
-                ], function (func) {
+                ]).forEach(function (func) {
                     func(deck, control, value, status);
                 });
 
@@ -136,10 +162,8 @@ var Beatmixxxx = {
             OFF: 0x00
         },
 
-        set: function (deck, control, status) {
-            _.forEach(deck.getChannels(), function (channel) {
-                midi.sendShortMsg(0x90 + channel, control - 1, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
-            });
+        set: function (channel, control, status) {
+            midi.sendShortMsg(0x90 + channel, control - 1, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
         }
     },
 
