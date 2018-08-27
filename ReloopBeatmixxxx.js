@@ -45,7 +45,7 @@ var Beatmixxxx = {
                 },
 
                 setValue: function (parameter, value) {
-                    if (value === undefined) {
+                    if (_.isUndefined(value)) {
                         value = true;
                     }
                     engine.setValue(this.group, parameter, value);
@@ -97,10 +97,17 @@ var Beatmixxxx = {
                 }
             });
 
-            this.registerSimpleButton("sync", "beatsync");
+            this.registerListener({
+                name: "sync",
+                buttonLed: "nonShifted",
+                onDownNonShifted: function (deck) {
+                    deck.setValue("beatsync");
+                }
+            });
 
             this.registerListener({
                 name: "cue",
+                buttonLed: "shifted",
                 onDownShifted: function (deck) {
                     deck.setValue("start");
                 }
@@ -108,6 +115,7 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "play",
+                buttonLed: "both",
                 onDownNonShifted: function (deck) {
                     deck.toggleValue("play");
                 },
@@ -121,37 +129,40 @@ var Beatmixxxx = {
             });
         },
 
-        registerSimpleButton: function (buttonName, controlName) {
-            this.registerListener({
-                name: buttonName,
-                onDownNonShifted: function (deck) {
-                    deck.setValue(controlName);
-                },
-                onInputNonShifted: function (deck, control, value) {
-                    deck.setLed(control, value);
-                }
-            });
-        },
-
         registerListener: function (listener) {
             this[("control" + _.upperFirst(listener.name))] = function (channel, control, value, status, _group) {
                 var deck = Beatmixxxx.decks.fromChannel(channel);
                 var down = (value === Beatmixxxx.midiInput.values.DOWN);
 
                 _([
-                    _.defaultTo(listener.onInput, _.noop),
-                    Beatmixxxx.shifted ? _.defaultTo(listener.onInputShifted, _.noop) : _.noop,
-                    !Beatmixxxx.shifted ? _.defaultTo(listener.onInputNonShifted, _.noop) : _.noop,
+                    listener.onInput,
+                    Beatmixxxx.shifted ? listener.onInputShifted : _.noop,
+                    !Beatmixxxx.shifted ? listener.onInputNonShifted : _.noop,
 
-                    _.defaultTo(listener[down ? "onDown" : "onUp"], _.noop),
-                    Beatmixxxx.shifted ? _.defaultTo(listener[down ? "onDownShifted" : "onUpShifted"], _.noop) : _.noop,
-                    !Beatmixxxx.shifted ? _.defaultTo(listener[down ? "onDownNonShifted" : "onUpNonShifted"], _.noop) : _.noop
-                ]).forEach(function (func) {
-                    func(deck, control, value, status);
-                });
+                    listener[down ? "onDown" : "onUp"],
+                    Beatmixxxx.shifted ? listener[down ? "onDownShifted" : "onUpShifted"] : _.noop,
+                    !Beatmixxxx.shifted ? listener[down ? "onDownNonShifted" : "onUpNonShifted"] : _.noop
+                ])
+                    .filter(_.negate(_.isUndefined))
+                    .forEach(function (func) {
+                        func(deck, control, value, status);
+                    });
 
                 // parameter order changed here, value/down is second
                 _.defaultTo(listener.onBinaryInput, _.noop)(deck, down, channel, control, status);
+
+                if (down) {
+                    // don't merge these 'if's to prevent custom behavior from being overwritten
+                    if (
+                        listener.buttonLed === "both" ||
+                        listener.buttonLed === "shifted" && Beatmixxxx.shifted ||
+                        listener.buttonLed === "nonShifted" && !Beatmixxxx.shifted
+                    ) {
+                        deck.setLed(control, true);
+                    }
+                } else {
+                    deck.setLed(control, false);
+                }
             }
         }
     },
