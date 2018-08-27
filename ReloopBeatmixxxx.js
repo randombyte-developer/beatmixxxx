@@ -86,7 +86,8 @@ var Beatmixxxx = {
     midiInput: {
         values: {
             DOWN: 0x7F,
-            UP: 0x00
+            UP: 0x00,
+            ENCODER_OFFSET: 0x40
         },
 
         setup: function () {
@@ -127,6 +128,14 @@ var Beatmixxxx = {
                     }
                 }
             });
+
+            this.registerListener({
+                name: "trax",
+                onInput: function (value) {
+                    var speed = value - Beatmixxxx.midiInput.values.ENCODER_OFFSET;
+                    engine.setValue("[Library]", "MoveVertical", speed);
+                }
+            })
         },
 
         registerListener: function (listener) {
@@ -145,23 +154,32 @@ var Beatmixxxx = {
                 ])
                     .filter(_.negate(_.isUndefined))
                     .forEach(function (func) {
-                        func(deck, control, value, status);
+                        if (_.isUndefined(deck)) {
+                            func(value, control, status);
+                        } else {
+                            func(deck, value, control, status);
+                        }
                     });
 
-                // parameter order changed here, value/down is second
-                _.defaultTo(listener.onBinaryInput, _.noop)(deck, down, channel, control, status);
-
-                if (down) {
-                    // don't merge these 'if's to prevent custom behavior from being overwritten
-                    if (
-                        listener.buttonLed === "both" ||
-                        listener.buttonLed === "shifted" && Beatmixxxx.shifted ||
-                        listener.buttonLed === "nonShifted" && !Beatmixxxx.shifted
-                    ) {
-                        deck.setLed(control, true);
-                    }
+                if (_.isUndefined(deck)) {
+                    _.defaultTo(listener.onBinaryInput, _.noop)(down, control, status);
                 } else {
-                    deck.setLed(control, false);
+                    _.defaultTo(listener.onBinaryInput, _.noop)(deck, down, control, status);
+                }
+
+                if (!_.isUndefined(deck)) {
+                    if (down) {
+                        // don't merge these 'if's to prevent custom behavior from being overwritten
+                        if (
+                            listener.buttonLed === "both" ||
+                            listener.buttonLed === "shifted" && Beatmixxxx.shifted ||
+                            listener.buttonLed === "nonShifted" && !Beatmixxxx.shifted
+                        ) {
+                            deck.setLed(control, true);
+                        }
+                    } else {
+                        deck.setLed(control, false);
+                    }
                 }
             }
         }
