@@ -25,14 +25,27 @@ var Beatmixxxx = {
             return this[group.substring(8, 9)];
         },
 
-        fromChannel: function (channel) {
-            var deckNumber = _(Beatmixxxx.decks.sides.getAll())
-                .filter(function (side) {
-                    return _.includes(side.channels, channel);
-                })
-                .map("deck")
-                .first();
-            return Beatmixxxx.decks[deckNumber];
+        /**
+         * Returns the deck, if available, from the given channel. This takes the deck moving feature in account.
+         * Set canChangePosition accordingly to how many controls are given on the controller: There are two jog wheels,
+         * for 4 decks. But there are 4 load buttons, which don't have to be remapped if a deck changes its side/position.
+         *
+         * @param canChangePosition Defaults to true; set to true for jog wheels, play button and such; set to false for the load button or EQ etc.
+         */
+        fromChannel: function (channel, canChangePosition) {
+            canChangePosition = _.defaultTo(canChangePosition, true);
+
+            if (canChangePosition) {
+                var deckNumber = _(Beatmixxxx.decks.sides.getAll())
+                    .filter(function (side) {
+                        return _.includes(side.channels, channel);
+                    })
+                    .map("deck")
+                    .first();
+                return Beatmixxxx.decks[deckNumber];
+            } else {
+                return Beatmixxxx.decks[channel];
+            }
         },
 
         newDeck: function (number) {
@@ -91,10 +104,18 @@ var Beatmixxxx = {
         },
 
         setup: function () {
+            this.softTakeover.setup();
+
             this.registerListener({
                 name: "shift",
                 onBinaryInput: function (deck, down) {
                     Beatmixxxx.shifted = down;
+                },
+                onDown: function () {
+                    Beatmixxxx.midiInput.softTakeover.disableAll();
+                },
+                onUp: function () {
+                    Beatmixxxx.midiInput.softTakeover.enableIfHasChangedOrWasEnabled();
                 }
             });
 
@@ -135,12 +156,28 @@ var Beatmixxxx = {
                     var speed = value - Beatmixxxx.midiInput.values.ENCODER_OFFSET;
                     engine.setValue("[Library]", "MoveVertical", speed);
                 }
-            })
+            });
+
+            this.registerListener({
+                name: "load",
+                canChangePosition: false,
+                onDownNonShifted: function (deck) {
+                    deck.setValue("LoadSelectedTrack");
+                }
+            });
+
+            this.registerListener({
+                name: "crossfader",
+                onInput: function (value) {
+                    var position = script.absoluteLin(value, -1, 1, 0x00, 0x7F);
+                    Beatmixxxx.midiInput.softTakeover.receivedNewValue(position, "[Master]", "crossfader");
+                }
+            });
         },
 
         registerListener: function (listener) {
             this[("control" + _.upperFirst(listener.name))] = function (channel, control, value, status, _group) {
-                var deck = Beatmixxxx.decks.fromChannel(channel);
+                var deck = Beatmixxxx.decks.fromChannel(channel, listener.canChangePosition);
                 var down = (value === Beatmixxxx.midiInput.values.DOWN);
 
                 _([
@@ -167,9 +204,8 @@ var Beatmixxxx = {
                     _.defaultTo(listener.onBinaryInput, _.noop)(deck, down, control, status);
                 }
 
-                if (!_.isUndefined(deck)) {
+                if (!_.isUndefined(deck) && !_.isUndefined(listener.buttonLed)) {
                     if (down) {
-                        // don't merge these 'if's to prevent custom behavior from being overwritten
                         if (
                             listener.buttonLed === "both" ||
                             listener.buttonLed === "shifted" && Beatmixxxx.shifted ||
@@ -182,6 +218,68 @@ var Beatmixxxx = {
                     }
                 }
             }
+        },
+
+        softTakeover: {
+            setup: function () {
+                this.forEachEntry(function (group, parameter) {
+                    engine.makeConnection(group, parameter, Beatmixxxx.midiInput.softTakeover.checkForExternalChanges);
+                });
+            },
+
+            checkForExternalChanges: function (externalValue, group, parameter) {
+                var entry = Beatmixxxx.midiInput.softTakeover.list[group][parameter];
+
+                entry.enabled = entry.value !== externalValue; // catch the external changes by activating SoftTakeover
+                engine.softTakeover(group, parameter, entry.enabled);
+            },
+
+            disableAll: function () {
+                this.forEachEntry(function (group, parameter) {
+                    engine.softTakeover(group, parameter, false);
+                });
+            },
+
+            enableIfHasChangedOrWasEnabled: function () {
+                this.forEachEntry(function (group, parameter, entry) {
+                    if (entry.hasChanged || entry.enabled) {
+                        engine.softTakeover(group, parameter, true);
+                        entry.enabled = true;
+                        entry.hasChanged = false;
+                    }
+                });
+            },
+
+            receivedNewValue: function (value, group, parameter) {
+                var entry = Beatmixxxx.midiInput.softTakeover.list[group][parameter];
+                if (!Beatmixxxx.shifted) {
+                    entry.value = value;
+                    engine.setValue(group, parameter, value);
+                }
+                entry.hasChanged = entry.value !== value;
+            },
+
+            forEachEntry: function (func) {
+                _.forEach(this.list, function (entries, group) {
+                    _.forEach(entries, function (entry, parameter) {
+                        func(group, parameter, entry);
+                    });
+                });
+            },
+
+            list: _({
+                "[Master]": {
+                    "crossfader": {}
+                }
+            }).mapValues(function (entries) {
+                return _.mapValues(entries, function () {
+                    return {
+                        enabled: false,
+                        hasChanged: false,
+                        value: 0.0
+                    };
+                })
+            }).value()
         }
     },
 
