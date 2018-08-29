@@ -151,10 +151,26 @@ var Beatmixxxx = {
             });
 
             this.registerListener({
-                name: "trax",
-                onInput: function (value) {
+                name: "traxRotate",
+                onInputNonShifted: function (value) {
                     var speed = value - Beatmixxxx.midiInput.values.ENCODER_OFFSET;
                     engine.setValue("[Library]", "MoveVertical", speed);
+                }
+            });
+
+            this.registerListener({
+                name: "traxPress",
+                onDownNonShifted: function () {
+                    // there seem to be only 2 states anyway
+                    engine.setValue("[Library]", "MoveFocus", 1);
+
+                    // wiggle the knob to make Mixxx show the blue selection marker
+                    engine.setValue("[Library]", "MoveVertical", 1);
+                    engine.setValue("[Library]", "MoveVertical", -1);
+                },
+                onDownShifted: function () {
+                    // there's just an "open folder" feature in this mapping, no "close" yet
+                    engine.setValue("[Library]", "MoveRight", true)
                 }
             });
 
@@ -173,11 +189,23 @@ var Beatmixxxx = {
                     Beatmixxxx.midiInput.softTakeover.receivedNewValue(position, "[Master]", "crossfader");
                 }
             });
+
+            this.registerListener({
+                name: "leftDeckSwitch",
+                noDeck: true,
+                onDownNonShifted: function () {
+                    script.toggleControl("[Master]", "maximize_library");
+                }
+            })
         },
 
         registerListener: function (listener) {
             this[("control" + _.upperFirst(listener.name))] = function (channel, control, value, status, _group) {
-                var deck = Beatmixxxx.decks.fromChannel(channel, listener.canChangePosition);
+
+                if (!listener.noDeck) {
+                    // this deck variable is actually declared and accessible outside of the "if" because JavaScript
+                    var deck = Beatmixxxx.decks.fromChannel(channel, listener.canChangePosition);
+                }
                 var down = (value === Beatmixxxx.midiInput.values.DOWN);
 
                 _([
