@@ -1,5 +1,6 @@
 var Beatmixxxx = {
     shifted: false,
+
     decks: {
         setup: function () {
             _.times(4, function (i) { Beatmixxxx.decks.newDeck(i + 1).setup(); });
@@ -18,6 +19,22 @@ var Beatmixxxx = {
 
             getAll: function () {
                 return [this.left, this.right];
+            },
+
+            fromChannel: function (channel) {
+                return _(Beatmixxxx.decks.sides.getAll())
+                    .filter(function (side) {
+                        return _.includes(side.channels, channel);
+                    }).first();
+            },
+
+            modifierPressed: function (modifier, ledMidiNumber, channel) {
+                var side = Beatmixxxx.decks.sides.fromChannel(channel);
+                side.deck = ((side.deck - 1) ^ modifier) + 1;
+
+                _.forEach(side.channels, function (ch) {
+                    Beatmixxxx.leds.set(ch, ledMidiNumber, (side.deck - 1) & modifier, 0x40);
+                });
             }
         },
 
@@ -36,12 +53,7 @@ var Beatmixxxx = {
             canChangePosition = _.defaultTo(canChangePosition, true);
 
             if (canChangePosition) {
-                var deckNumber = _(Beatmixxxx.decks.sides.getAll())
-                    .filter(function (side) {
-                        return _.includes(side.channels, channel);
-                    })
-                    .map("deck")
-                    .first();
+                var deckNumber = Beatmixxxx.decks.sides.fromChannel(channel).deck;
                 return Beatmixxxx.decks[deckNumber];
             } else {
                 return Beatmixxxx.decks[channel];
@@ -53,8 +65,7 @@ var Beatmixxxx = {
                 number: number,
                 group: "[Channel" + number + "]",
 
-                makeConnection: function (control, callback) {
-                    engine.makeConnection(this.group, control, callback).trigger();
+                setup: function () {
                 },
 
                 setValue: function (parameter, value) {
@@ -74,9 +85,13 @@ var Beatmixxxx = {
                     return newValue;
                 },
 
-                setLed: function (control, status) {
+                makeConnection: function (control, callback) {
+                    engine.makeConnection(this.group, control, callback).trigger();
+                },
+
+                setLed: function (control, status, shiftOffset) {
                     _.forEach(this.getChannels(), function (channel) {
-                        Beatmixxxx.leds.set(channel, control, status);
+                        Beatmixxxx.leds.set(channel, control, status, shiftOffset);
                     });
                 },
 
@@ -89,13 +104,11 @@ var Beatmixxxx = {
                         .filter({ deck: this.number })
                         .flatMap("channels")
                         .value();
-                },
-
-                setup: function () {
                 }
             };
         }
     },
+
     midiInput: {
         values: {
             DOWN: 0x7F,
@@ -121,7 +134,11 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "sync",
-                buttonLed: "nonShifted",
+                led: {
+                    midiNumber: 0x20,
+                    behavior: "nonShifted",
+                    shiftOffset: 0x40
+                },
                 onDownNonShifted: function (deck) {
                     deck.setValue("beatsync");
                 }
@@ -129,7 +146,11 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "cue",
-                buttonLed: "shifted",
+                led: {
+                    midiNumber: 0x22,
+                    behavior: "shifted",
+                    shiftOffset: 0x40
+                },
                 onDownShifted: function (deck) {
                     deck.setValue("start");
                 }
@@ -137,7 +158,11 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "play",
-                buttonLed: "both",
+                led: {
+                    midiNumber: 0x23,
+                    behavior: "both",
+                    shiftOffset: 0x40
+                },
                 onDownNonShifted: function (deck) {
                     deck.toggleValue("play");
                 },
@@ -152,6 +177,7 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "traxRotate",
+                noDeck: true,
                 onInputNonShifted: function (value) {
                     var speed = value - Beatmixxxx.midiInput.values.ENCODER_OFFSET;
                     engine.setValue("[Library]", "MoveVertical", speed);
@@ -160,6 +186,7 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "traxPress",
+                noDeck: true,
                 onDownNonShifted: function () {
                     // there seem to be only 2 states anyway
                     engine.setValue("[Library]", "MoveFocus", 1);
@@ -177,6 +204,10 @@ var Beatmixxxx = {
             this.registerListener({
                 name: "load",
                 canChangePosition: false,
+                led: {
+                    midiNumber: 0x50,
+                    behavior: "nonShifted"
+                },
                 onDownNonShifted: function (deck) {
                     deck.setValue("LoadSelectedTrack");
                 }
@@ -184,6 +215,7 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "crossfader",
+                noDeck: true,
                 onInput: function (value) {
                     var position = script.absoluteLin(value, -1, 1, 0x00, 0x7F);
                     Beatmixxxx.midiInput.softTakeover.receivedNewValue(position, "[Master]", "crossfader");
@@ -196,7 +228,23 @@ var Beatmixxxx = {
                 onDownNonShifted: function () {
                     script.toggleControl("[Master]", "maximize_library");
                 }
-            })
+            });
+
+            this.registerListener({
+                name: "pitchPlus",
+                noDeck: true,
+                onDownNonShifted: function (_value, control, channel) {
+                    Beatmixxxx.decks.sides.modifierPressed(1, 0x24, channel);
+                }
+            });
+
+            this.registerListener({
+                name: "pitchMinus",
+                noDeck: true,
+                onDownNonShifted: function (_value, control, channel) {
+                    Beatmixxxx.decks.sides.modifierPressed(2, 0x25, channel);
+                }
+            });
         },
 
         registerListener: function (listener) {
@@ -205,6 +253,11 @@ var Beatmixxxx = {
                 if (!listener.noDeck) {
                     // this deck variable is actually declared and accessible outside of the "if" because JavaScript
                     var deck = Beatmixxxx.decks.fromChannel(channel, listener.canChangePosition);
+
+                    // shortcut function
+                    listener.setLed = function (lit, shiftOffset) {
+                        deck.setLed(control, lit, shiftOffset);
+                    };
                 }
                 var down = (value === Beatmixxxx.midiInput.values.DOWN);
 
@@ -220,29 +273,33 @@ var Beatmixxxx = {
                     .filter(_.negate(_.isUndefined))
                     .forEach(function (func) {
                         if (_.isUndefined(deck)) {
-                            func(value, control, status);
+                            func(value, control, channel, status);
                         } else {
                             func(deck, value, control, status);
                         }
                     });
 
                 if (_.isUndefined(deck)) {
-                    _.defaultTo(listener.onBinaryInput, _.noop)(down, control, status);
+                    _.defaultTo(listener.onBinaryInput, _.noop)(down, control, channel, status);
                 } else {
                     _.defaultTo(listener.onBinaryInput, _.noop)(deck, down, control, status);
                 }
 
-                if (!_.isUndefined(deck) && !_.isUndefined(listener.buttonLed)) {
+                if (!_.isUndefined(deck)
+                    && !_.isUndefined(listener.led)
+                    && !_.isUndefined(listener.led.midiNumber)
+                    && !_.isUndefined(listener.led.behavior)) {
+
                     if (down) {
                         if (
-                            listener.buttonLed === "both" ||
-                            listener.buttonLed === "shifted" && Beatmixxxx.shifted ||
-                            listener.buttonLed === "nonShifted" && !Beatmixxxx.shifted
+                            listener.led.behavior === "both" ||
+                            listener.led.behavior === "shifted" && Beatmixxxx.shifted ||
+                            listener.led.behavior === "nonShifted" && !Beatmixxxx.shifted
                         ) {
-                            deck.setLed(control, true);
+                            deck.setLed(listener.led.midiNumber, true, listener.led.shiftOffset);
                         }
                     } else {
-                        deck.setLed(control, false);
+                        deck.setLed(listener.led.midiNumber, false, listener.led.shiftOffset);
                     }
                 }
             }
@@ -317,8 +374,11 @@ var Beatmixxxx = {
             OFF: 0x00
         },
 
-        set: function (channel, control, status) {
-            midi.sendShortMsg(0x90 + channel, control - 1, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
+        set: function (channel, control, status, shiftOffset) {
+            midi.sendShortMsg(0x90 + channel, control, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
+            if (!_.isUndefined(shiftOffset)) {
+                midi.sendShortMsg(0x90 + channel, control + shiftOffset, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
+            }
         }
     },
 
