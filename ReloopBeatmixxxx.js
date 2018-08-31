@@ -6,6 +6,10 @@ var Beatmixxxx = {
             _.times(4, function (i) { Beatmixxxx.decks.newDeck(i + 1).setup(); });
         },
 
+        getAll: function() {
+            return _.times(4, function (i) { return Beatmixxxx.decks[i + 1] });
+        },
+
         // which deck is on which side, one deck can be on both sides at the same time
         sides: {
             left: {
@@ -35,6 +39,8 @@ var Beatmixxxx = {
                 _.forEach(side.channels, function (ch) {
                     Beatmixxxx.leds.set(ch, ledMidiNumber, (side.deck - 1) & modifier, 0x40);
                 });
+
+                Beatmixxxx.midiInput.softTakeover.onDeckChanged();
             }
         },
 
@@ -190,10 +196,6 @@ var Beatmixxxx = {
                 onDownNonShifted: function () {
                     // there seem to be only 2 states anyway
                     engine.setValue("[Library]", "MoveFocus", 1);
-
-                    // wiggle the knob to make Mixxx show the blue selection marker
-                    engine.setValue("[Library]", "MoveVertical", 1);
-                    engine.setValue("[Library]", "MoveVertical", -1);
                 },
                 onDownShifted: function () {
                     // there's just an "open folder" feature in this mapping, no "close" yet
@@ -232,6 +234,14 @@ var Beatmixxxx = {
             });
 
             this.registerListener({
+                name: "rate",
+                onInput: function (deck, value) {
+                    var rate = script.absoluteLin(value, 1, -1, 0x00, 0x7F);
+                    deck.setValue("rate", rate);
+                }
+            });
+
+            this.registerListener({
                 name: "leftDeckSwitch",
                 noDeck: true,
                 onDownNonShifted: function () {
@@ -258,6 +268,8 @@ var Beatmixxxx = {
 
         registerListener: function (listener) {
             this[("control" + _.upperFirst(listener.name))] = function (channel, control, value, status, _group) {
+
+                listener.canChangePosition = _.defaultTo(listener.canChangePosition, true);
 
                 if (!listener.noDeck) {
                     // this deck variable is actually declared and accessible outside of the "if" because JavaScript
@@ -299,16 +311,24 @@ var Beatmixxxx = {
                     && !_.isUndefined(listener.led.midiNumber)
                     && !_.isUndefined(listener.led.behavior)) {
 
+                    var set = function (lit) {
+                        if (listener.canChangePosition) {
+                            deck.setLed(listener.led.midiNumber, lit, listener.led.shiftOffset);
+                        } else {
+                            Beatmixxxx.leds.set(channel, listener.led.midiNumber, lit, listener.led.shiftOffset);
+                        }
+                    };
+
                     if (down) {
                         if (
                             listener.led.behavior === "both" ||
                             listener.led.behavior === "shifted" && Beatmixxxx.shifted ||
                             listener.led.behavior === "nonShifted" && !Beatmixxxx.shifted
                         ) {
-                            deck.setLed(listener.led.midiNumber, true, listener.led.shiftOffset);
+                            set(true);
                         }
                     } else {
-                        deck.setLed(listener.led.midiNumber, false, listener.led.shiftOffset);
+                        set(false);
                     }
                 }
             }
@@ -318,6 +338,16 @@ var Beatmixxxx = {
             setup: function () {
                 this.forEachEntry(function (group, parameter) {
                     engine.makeConnection(group, parameter, Beatmixxxx.midiInput.softTakeover.checkForExternalChanges);
+                });
+
+                _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
+                    engine.softTakeover(deck.group, "rate", true);
+                });
+            },
+
+            onDeckChanged: function () {
+                _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
+                    engine.softTakeoverIgnoreNextValue(deck.group, "rate");
                 });
             },
 
