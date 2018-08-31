@@ -264,6 +264,30 @@ var Beatmixxxx = {
                     Beatmixxxx.decks.sides.modifierPressed(2, 0x25, channel);
                 }
             });
+
+            this.registerListener({
+                name: "wheelTouch",
+                onDownNonShifted: function (deck) {
+                    var alpha = 1.0/8;
+                    var beta = alpha / 32;
+                    engine.scratchEnable(deck.number, 256, 33 + 1/3, alpha, beta);
+                },
+                onUpNonShifted: function (deck) {
+                    engine.scratchDisable(deck.number);
+                }
+            });
+
+            this.registerListener({
+                name: "wheelRotate",
+                onInputNonShifted: function (deck, value) {
+                    var speed = value - 0x40;
+                    if (engine.isScratching(deck.number)) {
+                        engine.scratchTick(deck.number, speed);
+                    } else {
+                        deck.setValue("jog", speed);
+                    }
+                }
+            })
         },
 
         registerListener: function (listener) {
