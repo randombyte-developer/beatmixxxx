@@ -223,6 +223,15 @@ var Beatmixxxx = {
             });
 
             this.registerListener({
+                name: "volume",
+                canChangePosition: false,
+                onInput: function (deck, value) {
+                    var volume = script.absoluteLin(value, 0, 1, 0x00, 0x7F);
+                    Beatmixxxx.midiInput.softTakeover.receivedNewValue(volume, deck.group, "volume");
+                }
+            });
+
+            this.registerListener({
                 name: "leftDeckSwitch",
                 noDeck: true,
                 onDownNonShifted: function () {
@@ -355,6 +364,19 @@ var Beatmixxxx = {
             list: _({
                 "[Master]": {
                     "crossfader": {}
+                },
+
+                "[Channel1]": { // TODO figure out how lodash can help here
+                    "volume": {}
+                },
+                "[Channel2]": {
+                    "volume": {}
+                },
+                "[Channel3]": {
+                    "volume": {}
+                },
+                "[Channel4]": {
+                    "volume": {}
                 }
             }).mapValues(function (entries) {
                 return _.mapValues(entries, function () {
