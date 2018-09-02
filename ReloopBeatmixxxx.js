@@ -279,8 +279,11 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "wheelRotate",
-                onInputNonShifted: function (deck, value) {
+                onInput: function (deck, value) {
                     var speed = value - 0x40;
+                    if (Beatmixxxx.shifted) {
+                        speed *= 10;
+                    }
                     if (engine.isScratching(deck.number)) {
                         engine.scratchTick(deck.number, speed);
                     } else {
