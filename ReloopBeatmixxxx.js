@@ -72,6 +72,11 @@ var Beatmixxxx = {
                 group: "[Channel" + number + "]",
 
                 setup: function () {
+                    var deck = this;
+
+                    this.makeConnection("pfl", function (value) {
+                        Beatmixxxx.leds.set(deck.number, 0x52, value, 0x20);
+                    });
                 },
 
                 setValue: function (parameter, value) {
@@ -289,6 +294,14 @@ var Beatmixxxx = {
                     } else {
                         deck.setValue("jog", speed);
                     }
+                }
+            })
+
+            this.registerListener({
+                name: "pfl",
+                canChangePosition: false,
+                onDownNonShifted: function (deck) {
+                    deck.toggleValue("pfl");
                 }
             })
         },
