@@ -1,5 +1,50 @@
 var Beatmixxxx = {
-    shifted: false,
+    state: {
+        global: {
+            shifted: false
+        },
+        side: {
+            fromChannel: function (channel) {
+                var sideName = Beatmixxxx.decks.sides.fromChannel(channel).name;
+                var sideState = Beatmixxxx.state.side[sideName];
+
+                return sideState;
+            },
+
+            setup: function () {
+                defaultSideState = {
+                    modeA: true,
+                    modeB: false,
+
+                    setA: function () {
+                        this.modeA = true;
+                        this.modeB = false;
+                    },
+                    setB: function () {
+                        this.modeB = true;
+                        this.modeA = false;
+                    },
+                    setAB: function () {
+                        this.modeA = true;
+                        this.modeB = true;
+                    },
+
+                    isA: function () {
+                        return this.modeA === true && this.modeB === false;
+                    },
+                    isB: function () {
+                        return this.modeB === true && this.modeA === false;
+                    },
+                    isAB: function () {
+                        return this.modeA === true && this.modeB === true;
+                    }
+                };
+
+                this.left = _.clone(defaultSideState);
+                this.right = _.clone(defaultSideState);
+            }
+        }
+    },
 
     decks: {
         setup: function () {
@@ -13,10 +58,12 @@ var Beatmixxxx = {
         // which deck is on which side, one deck can be on both sides at the same time
         sides: {
             left: {
+                name: "left",
                 channels: [1, 3],
                 deck: 1
             },
             right: {
+                name: "right",
                 channels: [2, 4],
                 deck: 2
             },
@@ -41,6 +88,7 @@ var Beatmixxxx = {
                 });
 
                 Beatmixxxx.midiInput.softTakeover.onDeckChanged();
+                Beatmixxxx.decks.fromChannel(channel).triggerConnections();
             }
         },
 
@@ -71,12 +119,20 @@ var Beatmixxxx = {
                 number: number,
                 group: "[Channel" + number + "]",
 
+                connections: [],
+
                 setup: function () {
                     var deck = this;
 
                     this.makeConnection("pfl", function (value) {
                         Beatmixxxx.leds.set(deck.number, 0x52, value, 0x20);
                     });
+
+                    deck.connections = _.concat(deck.connections, _.map(_.range(4), function (padIndex) {
+                        return deck.makeConnection("hotcue_" + (padIndex + 1) + "_enabled", function (value) {
+                            deck.setLed(padIndex, value, 0x40);
+                        });
+                    }));
                 },
 
                 setValue: function (parameter, value) {
@@ -97,7 +153,13 @@ var Beatmixxxx = {
                 },
 
                 makeConnection: function (control, callback) {
-                    engine.makeConnection(this.group, control, callback).trigger();
+                    return engine.makeConnection(this.group, control, callback);
+                },
+
+                triggerConnections: function () {
+                    _.forEach(this.connections, function (connection) {
+                        connection.trigger();
+                    })
                 },
 
                 setLed: function (control, status, shiftOffset) {
@@ -133,7 +195,7 @@ var Beatmixxxx = {
             this.registerListener({
                 name: "shift",
                 onBinaryInput: function (deck, down) {
-                    Beatmixxxx.shifted = down;
+                    Beatmixxxx.state.global.shifted = down;
                 },
                 onDown: function () {
                     Beatmixxxx.midiInput.softTakeover.disableAll();
@@ -286,7 +348,7 @@ var Beatmixxxx = {
                 name: "wheelRotate",
                 onInput: function (deck, value) {
                     var speed = value - 0x40;
-                    if (Beatmixxxx.shifted) {
+                    if (Beatmixxxx.state.global.shifted) {
                         speed *= 10;
                     }
                     if (engine.isScratching(deck.number)) {
@@ -295,7 +357,7 @@ var Beatmixxxx = {
                         deck.setValue("jog", speed);
                     }
                 }
-            })
+            });
 
             this.registerListener({
                 name: "pfl",
@@ -303,7 +365,47 @@ var Beatmixxxx = {
                 onDownNonShifted: function (deck) {
                     deck.toggleValue("pfl");
                 }
-            })
+            });
+
+            this.registerListener({
+                name: "padModeA",
+                noDeck: true,
+                onUpNonShifted: function (_value, _control, channel) {
+                    Beatmixxxx.state.side.fromChannel(channel).setA();
+                }
+            });
+
+            this.registerListener({
+                name: "padModeB",
+                noDeck: true,
+                onUpNonShifted: function (_value, _control, channel) {
+                    Beatmixxxx.state.side.fromChannel(channel).setB(); // todo reduce duplicated code
+                }
+            });
+
+            var midiSetup = this;
+
+            _.forEach(_.range(4), function (padIndex) {
+                midiSetup.registerListener({
+                    name: "bluePad" + padIndex,
+                    onBinaryInput: function (deck, down, _control, channel) {
+                        var sideState = Beatmixxxx.state.side.fromChannel(channel);
+
+                        if (sideState.isA()) {
+                            if (down) {
+                                if (Beatmixxxx.state.global.shifted) {
+                                    deck.setValue("hotcue_" + (padIndex + 1) + "_clear");
+                                } else {
+                                    deck.setValue("hotcue_" + (padIndex + 1) + "_activate", true);
+                                }
+                            } else {
+                                deck.setValue("hotcue_" + (padIndex + 1) + "_activate", false);
+
+                            }
+                        }
+                    }
+                });
+            });
         },
 
         registerListener: function (listener) {
@@ -324,27 +426,35 @@ var Beatmixxxx = {
 
                 _([
                     listener.onInput,
-                    Beatmixxxx.shifted ? listener.onInputShifted : _.noop,
-                    !Beatmixxxx.shifted ? listener.onInputNonShifted : _.noop,
+                    Beatmixxxx.state.global.shifted ? listener.onInputShifted : _.noop,
+                    !Beatmixxxx.state.global.shifted ? listener.onInputNonShifted : _.noop,
 
                     listener[down ? "onDown" : "onUp"],
-                    Beatmixxxx.shifted ? listener[down ? "onDownShifted" : "onUpShifted"] : _.noop,
-                    !Beatmixxxx.shifted ? listener[down ? "onDownNonShifted" : "onUpNonShifted"] : _.noop
+                    Beatmixxxx.state.global.shifted ? listener[down ? "onDownShifted" : "onUpShifted"] : _.noop,
+                    !Beatmixxxx.state.global.shifted ? listener[down ? "onDownNonShifted" : "onUpNonShifted"] : _.noop
                 ])
                     .filter(_.negate(_.isUndefined))
                     .forEach(function (func) {
                         if (_.isUndefined(deck)) {
                             func(value, control, channel, status);
                         } else {
-                            func(deck, value, control, status);
+                            func(deck, value, control, channel, status);
                         }
                     });
 
-                if (_.isUndefined(deck)) {
-                    _.defaultTo(listener.onBinaryInput, _.noop)(down, control, channel, status);
-                } else {
-                    _.defaultTo(listener.onBinaryInput, _.noop)(deck, down, control, status);
-                }
+                _([
+                    listener.onBinaryInput,
+                    Beatmixxxx.state.global.shifted ? listener.onBinaryInputShifted : _.noop,
+                    !Beatmixxxx.state.global.shifted ? listener.onBinaryInputNonShifted : _.noop
+                ])
+                    .filter(_.negate(_.isUndefined))
+                    .forEach(function (func) {
+                        if (_.isUndefined(deck)) {
+                            func(down, control, channel, status);
+                        } else {
+                            func(deck, down, control, channel, status);
+                        }
+                    });
 
                 if (!_.isUndefined(deck)
                     && !_.isUndefined(listener.led)
@@ -362,8 +472,8 @@ var Beatmixxxx = {
                     if (down) {
                         if (
                             listener.led.behavior === "both" ||
-                            listener.led.behavior === "shifted" && Beatmixxxx.shifted ||
-                            listener.led.behavior === "nonShifted" && !Beatmixxxx.shifted
+                            listener.led.behavior === "shifted" && Beatmixxxx.state.global.shifted ||
+                            listener.led.behavior === "nonShifted" && !Beatmixxxx.state.global.shifted
                         ) {
                             set(true);
                         }
@@ -416,7 +526,7 @@ var Beatmixxxx = {
 
             receivedNewValue: function (value, group, parameter) {
                 var entry = Beatmixxxx.midiInput.softTakeover.list[group][parameter];
-                if (!Beatmixxxx.shifted) {
+                if (!Beatmixxxx.state.global.shifted) {
                     entry.value = value;
                     engine.setValue(group, parameter, value);
                 }
@@ -483,5 +593,9 @@ var Beatmixxxx = {
     }
 };
 
+Beatmixxxx.state.side.setup();
 Beatmixxxx.decks.setup();
 Beatmixxxx.midiInput.setup();
+_.forEach(Beatmixxxx.decks.getAll(), function (deck) {
+    deck.triggerConnections();
+});
