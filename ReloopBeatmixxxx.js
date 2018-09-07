@@ -194,14 +194,9 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "shift",
-                onBinaryInput: function (deck, down) {
+                noDeck: true,
+                onBinaryInput: function (down) {
                     Beatmixxxx.state.global.shifted = down;
-                },
-                onDown: function () {
-                    Beatmixxxx.midiInput.softTakeover.disableAll();
-                },
-                onUp: function () {
-                    Beatmixxxx.midiInput.softTakeover.enableIfHasChangedOrWasEnabled();
                 }
             });
 
@@ -286,8 +281,7 @@ var Beatmixxxx = {
                 name: "crossfader",
                 noDeck: true,
                 onInput: function (value) {
-                    var position = script.absoluteLin(value, -1, 1, 0x00, 0x7F);
-                    Beatmixxxx.midiInput.softTakeover.receivedNewValue(position, "[Master]", "crossfader");
+                    Beatmixxxx.midiInput.softTakeover.midiInput("[Master]", "crossfader", value, !Beatmixxxx.state.global.shifted);
                 }
             });
 
@@ -295,8 +289,8 @@ var Beatmixxxx = {
                 name: "volume",
                 canChangePosition: false,
                 onInput: function (deck, value) {
-                    var volume = script.absoluteLin(value, 0, 1, 0x00, 0x7F);
-                    Beatmixxxx.midiInput.softTakeover.receivedNewValue(volume, deck.group, "volume");
+                    Beatmixxxx.midiInput.softTakeover.midiInput(deck.group, "volume", value, !Beatmixxxx.state.global.shifted);
+
                 }
             });
 
@@ -368,6 +362,43 @@ var Beatmixxxx = {
             });
 
             this.registerListener({
+                name: "gainKnob",
+                canChangePosition: false,
+                onInputNonShifted: function (deck, value) {
+                    Beatmixxxx.midiInput.softTakeover.midiInput(deck.group, "pregain", value, !Beatmixxxx.state.global.shifted);
+                }
+            });
+
+            this.registerListener({
+                name: "highKnob",
+                canChangePosition: false,
+                onInputShifted: function (deck, value) {
+                    // high
+                    Beatmixxxx.midiInput.softTakeover.midiInput("[EqualizerRack1_" + deck.group + "_Effect1]", "parameter3", value, Beatmixxxx.state.global.shifted);
+                }
+            });
+
+            this.registerListener({
+                name: "midKnob",
+                canChangePosition: false,
+                onInputShifted: function (deck, value) {
+                    // mid
+                    Beatmixxxx.midiInput.softTakeover.midiInput("[EqualizerRack1_" + deck.group + "_Effect1]", "parameter2", value, Beatmixxxx.state.global.shifted);
+                }
+            });
+
+            this.registerListener({
+                name: "lowKnob",
+                canChangePosition: false,
+                onInput: function (deck, value) {
+                    // low
+                    Beatmixxxx.midiInput.softTakeover.midiInput("[EqualizerRack1_" + deck.group + "_Effect1]", "parameter1", value, Beatmixxxx.state.global.shifted);
+                    // filter
+                    Beatmixxxx.midiInput.softTakeover.midiInput("[QuickEffectRack1_" + deck.group + "]", "super1", value, !Beatmixxxx.state.global.shifted);
+                }
+            });
+
+            this.registerListener({
                 name: "padModeA",
                 noDeck: true,
                 onUpNonShifted: function (_value, _control, channel) {
@@ -379,7 +410,7 @@ var Beatmixxxx = {
                 name: "padModeB",
                 noDeck: true,
                 onUpNonShifted: function (_value, _control, channel) {
-                    Beatmixxxx.state.side.fromChannel(channel).setB(); // todo reduce duplicated code
+                    Beatmixxxx.state.side.fromChannel(channel).setB();
                 }
             });
 
@@ -400,7 +431,6 @@ var Beatmixxxx = {
                                 }
                             } else {
                                 deck.setValue("hotcue_" + (padIndex + 1) + "_activate", false);
-
                             }
                         }
                     }
@@ -422,7 +452,22 @@ var Beatmixxxx = {
                         deck.setLed(control, lit, shiftOffset);
                     };
                 }
+
                 var down = (value === Beatmixxxx.midiInput.values.DOWN);
+
+                _([
+                    listener.onBinaryInput,
+                    Beatmixxxx.state.global.shifted ? listener.onBinaryInputShifted : _.noop,
+                    !Beatmixxxx.state.global.shifted ? listener.onBinaryInputNonShifted : _.noop
+                ])
+                    .filter(_.negate(_.isUndefined))
+                    .forEach(function (func) {
+                        if (_.isUndefined(deck)) {
+                            func(down, control, channel, status);
+                        } else {
+                            func(deck, down, control, channel, status);
+                        }
+                    });
 
                 _([
                     listener.onInput,
@@ -439,20 +484,6 @@ var Beatmixxxx = {
                             func(value, control, channel, status);
                         } else {
                             func(deck, value, control, channel, status);
-                        }
-                    });
-
-                _([
-                    listener.onBinaryInput,
-                    Beatmixxxx.state.global.shifted ? listener.onBinaryInputShifted : _.noop,
-                    !Beatmixxxx.state.global.shifted ? listener.onBinaryInputNonShifted : _.noop
-                ])
-                    .filter(_.negate(_.isUndefined))
-                    .forEach(function (func) {
-                        if (_.isUndefined(deck)) {
-                            func(down, control, channel, status);
-                        } else {
-                            func(deck, down, control, channel, status);
                         }
                     });
 
@@ -486,51 +517,117 @@ var Beatmixxxx = {
 
         softTakeover: {
             setup: function () {
-                this.forEachEntry(function (group, parameter) {
-                    engine.makeConnection(group, parameter, Beatmixxxx.midiInput.softTakeover.checkForExternalChanges);
-                });
+                var defaultSoftTakeoverEntry = {
+                    isInSync: false, // try if hardware and software control are in sync
+                    lastSetControlValue: 0.0, // last control value set by this script
+                    takeoverRange: 0.05,
+                    roundingPrecision: 2, // rounding may actually not be needed
+
+                    offerNewValue: function (group, parameter, value) {
+                        var engineValue = engine.getParameter(group, parameter);
+                        var diff = _.max([value, engineValue]) - _.min([value, engineValue]);
+
+                        if (diff < this.takeoverRange || this.isInSync) {
+                            engine.setParameter(group, parameter, value);
+
+                            this.lastSetControlValue = value;
+                            this.isInSync = true;
+                        }
+                    },
+
+                    hardwareMoved: function (group, parameter, value) {
+                        this.isInSync = value === _.round(engine.getParameter(group, parameter), this.roundingPrecision);
+                    },
+
+                    scaleMidiValue: function (value) {
+                        if (!_.isUndefined(this.controlMid)) {
+                            return script.absoluteNonLin(value, this.controlLow, this.controlMid, this.controlHigh, this.midiMin, this.midiMax);
+
+                        } else {
+                            return script.absoluteLin(value, this.controlLow, this.controlHigh, this.midiMin, this.midiMax);
+                        }
+                    }
+                };
+
+                var makeLinearSoftTakeoverEntry = function (controlLow, controlHigh, midiMin, midiMax) {
+
+                    var entry = _.clone(defaultSoftTakeoverEntry);
+
+                    if (_.isUndefined(midiMin)) {
+                        midiMin = 0x00;
+                    }
+                    if (_.isUndefined(midiMax)) {
+                        midiMax = 0x7F;
+                    }
+
+                    entry.controlLow = controlLow;
+                    entry.controlHigh = controlHigh;
+                    entry.hardwareMin = midiMin;
+                    entry.hardwareMax = midiMax;
+
+                    return entry;
+                };
+
+                var makeNonLinearSoftTakeoverEntry = function (controlLow, controlMid, controlHigh, midiMin, midiMax) {
+                    var entry = makeLinearSoftTakeoverEntry(controlLow, controlHigh, midiMin, midiMax);
+                    entry.controlMid = controlMid;
+
+                    return entry
+                };
+
+                Beatmixxxx.midiInput.softTakeover.list = {
+                    "[Master]": {
+                        "crossfader": makeLinearSoftTakeoverEntry(-1, 1)
+                    }
+                };
 
                 _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
                     engine.softTakeover(deck.group, "rate", true);
+
+                    Beatmixxxx.midiInput.softTakeover.list["[EqualizerRack1_" + deck.group + "_Effect1]"] = {
+                        "parameter1": makeLinearSoftTakeoverEntry(0, 1), // low
+                        "parameter2": makeLinearSoftTakeoverEntry(0, 1), // mid
+                        "parameter3": makeLinearSoftTakeoverEntry(0, 1) // high
+                    };
+
+
+                    Beatmixxxx.midiInput.softTakeover.list["[QuickEffectRack1_" + deck.group + "]"] = {
+                        "super1": makeLinearSoftTakeoverEntry(0, 1) // filter
+                    };
+
+                    Beatmixxxx.midiInput.softTakeover.list[deck.group] = {
+                        "pregain": makeLinearSoftTakeoverEntry(0, 1),
+                        "volume": makeLinearSoftTakeoverEntry(0, 1)
+                    };
                 });
+
+                this.forEachEntry(function (group, parameter, entry) {
+                    engine.makeConnection(group, parameter, Beatmixxxx.midiInput.softTakeover.controlValueChangedFunction(group, parameter, entry));
+                });
+            },
+
+            midiInput: function (group, parameter, midiValue, affectsControl) {
+                var entry = this.list[group][parameter];
+
+                var roundedValue = _.round(entry.scaleMidiValue(midiValue), entry.roundingPrecision);
+
+                if (affectsControl) {
+                    entry.offerNewValue(group, parameter, roundedValue);
+                }
+                entry.hardwareMoved(group, parameter, roundedValue);
+            },
+
+            controlValueChangedFunction: function (group, parameter, entry) {
+                return function (_value) { // don't use the passed value because it is not scaled unlike getParameter
+                    var externalValue = _.round(engine.getParameter(group, parameter), entry.roundingPrecision);
+                    entry.isInSync = entry.lastSetControlValue === externalValue;
+                };
             },
 
             onDeckChanged: function () {
                 _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
                     engine.softTakeoverIgnoreNextValue(deck.group, "rate");
                 });
-            },
-
-            checkForExternalChanges: function (externalValue, group, parameter) {
-                var entry = Beatmixxxx.midiInput.softTakeover.list[group][parameter];
-
-                entry.enabled = entry.value !== externalValue; // catch the external changes by activating SoftTakeover
-                engine.softTakeover(group, parameter, entry.enabled);
-            },
-
-            disableAll: function () {
-                this.forEachEntry(function (group, parameter) {
-                    engine.softTakeover(group, parameter, false);
-                });
-            },
-
-            enableIfHasChangedOrWasEnabled: function () {
-                this.forEachEntry(function (group, parameter, entry) {
-                    if (entry.hasChanged || entry.enabled) {
-                        engine.softTakeover(group, parameter, true);
-                        entry.enabled = true;
-                        entry.hasChanged = false;
-                    }
-                });
-            },
-
-            receivedNewValue: function (value, group, parameter) {
-                var entry = Beatmixxxx.midiInput.softTakeover.list[group][parameter];
-                if (!Beatmixxxx.state.global.shifted) {
-                    entry.value = value;
-                    engine.setValue(group, parameter, value);
-                }
-                entry.hasChanged = entry.value !== value;
             },
 
             forEachEntry: function (func) {
@@ -541,32 +638,7 @@ var Beatmixxxx = {
                 });
             },
 
-            list: _({
-                "[Master]": {
-                    "crossfader": {}
-                },
-
-                "[Channel1]": { // TODO figure out how lodash can help here
-                    "volume": {}
-                },
-                "[Channel2]": {
-                    "volume": {}
-                },
-                "[Channel3]": {
-                    "volume": {}
-                },
-                "[Channel4]": {
-                    "volume": {}
-                }
-            }).mapValues(function (entries) {
-                return _.mapValues(entries, function () {
-                    return {
-                        enabled: false,
-                        hasChanged: false,
-                        value: 0.0
-                    };
-                })
-            }).value()
+            list: {} // filled in setup()
         }
     },
 
