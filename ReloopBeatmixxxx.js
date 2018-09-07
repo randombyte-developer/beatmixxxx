@@ -568,13 +568,6 @@ var Beatmixxxx = {
                     return entry;
                 };
 
-                var makeNonLinearSoftTakeoverEntry = function (controlLow, controlMid, controlHigh, midiMin, midiMax) {
-                    var entry = makeLinearSoftTakeoverEntry(controlLow, controlHigh, midiMin, midiMax);
-                    entry.controlMid = controlMid;
-
-                    return entry
-                };
-
                 Beatmixxxx.midiInput.softTakeover.list = {
                     "[Master]": {
                         "crossfader": makeLinearSoftTakeoverEntry(-1, 1)
