@@ -1,7 +1,8 @@
 var Beatmixxxx = {
     state: {
         global: {
-            shifted: false
+            shifted: false,
+            playIndicatorLit: false
         },
         side: {
             fromChannel: function (channel) {
@@ -125,9 +126,14 @@ var Beatmixxxx = {
                 setup: function () {
                     var deck = this;
 
-                    this.makeConnection("pfl", function (value) {
-                        Beatmixxxx.leds.set(deck.number, 0x52, value, 0x20);
-                    });
+                    deck.connections = _.concat(deck.connections, [
+                        this.makeConnection("pfl", function (value) { Beatmixxxx.leds.set(deck.number, 0x52, value, 0x20); }),
+                        this.makeConnection("play", function (value) {
+                            if (value) {
+                                Beatmixxxx.leds.set(deck.number, 0x23, true, 0x40);
+                            }
+                        })
+                    ]);
 
                     deck.connections = _.concat(deck.connections, _.map(_.range(4), function (padIndex) {
                         return deck.makeConnection("hotcue_" + (padIndex + 1) + "_enabled", function (value) {
@@ -227,11 +233,6 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "play",
-                led: {
-                    midiNumber: 0x23,
-                    behavior: "both",
-                    shiftOffset: 0x40
-                },
                 onDownNonShifted: function (deck) {
                     deck.toggleValue("play");
                 },
@@ -663,16 +664,33 @@ var Beatmixxxx = {
 
     init: function () {
         print("Hello there!");
+
+        this.setup();
+    },
+
+    setup: function () {
+        Beatmixxxx.state.side.setup();
+        Beatmixxxx.decks.setup();
+        Beatmixxxx.midiInput.setup();
+        _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
+            deck.triggerConnections();
+        });
+
+        // ready to play, button blinking
+        engine.beginTimer(500, function () {
+
+            Beatmixxxx.state.global.playIndicatorLit = !Beatmixxxx.state.global.playIndicatorLit;
+            _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
+                if (!deck.getValue("play")) {
+                    _.forEach(deck.getChannels(), function (channel) {
+                        Beatmixxxx.leds.set(channel, 0x23, Beatmixxxx.state.global.playIndicatorLit, 0x40);
+                    });
+                }
+            });
+        });
     },
 
     shutdown: function () {
 
     }
 };
-
-Beatmixxxx.state.side.setup();
-Beatmixxxx.decks.setup();
-Beatmixxxx.midiInput.setup();
-_.forEach(Beatmixxxx.decks.getAll(), function (deck) {
-    deck.triggerConnections();
-});
