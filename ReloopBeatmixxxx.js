@@ -15,6 +15,7 @@ var Beatmixxxx = {
                 defaultSideState = {
                     modeA: true,
                     modeB: false,
+                    beatloopSizePressed: false,
 
                     setA: function () {
                         this.modeA = true;
@@ -414,6 +415,17 @@ var Beatmixxxx = {
                 }
             });
 
+            this.registerListener({
+                name: "effectsEncoder",
+                onInputNonShifted: function (deck, value, _control, channel) {
+                    var speed = value - 0x40;
+
+                    if (Beatmixxxx.state.side.fromChannel(channel).beatloopSizePressed) {
+                        deck.setValue(speed > 0 ? "loop_double" : "loop_halve");
+                    }
+                }
+            });
+
             var midiSetup = this;
 
             _.forEach(_.range(4), function (padIndex) {
@@ -435,6 +447,30 @@ var Beatmixxxx = {
                         }
                     }
                 });
+            });
+
+            midiSetup.registerListener({
+                name: "bluePad4",
+                onDownNonShifted: function (deck, down, _control, channel) {
+                    var sideState = Beatmixxxx.state.side.fromChannel(channel);
+
+                    if (sideState.isA() && down) {
+                        if (deck.getValue("loop_enabled")) {
+                            var beatloopSize = deck.getValue("beatloop_size");
+                            deck.setValue("beatloop_" + beatloopSize + "_toggle");
+                        } else {
+                            deck.setValue("beatloop_activate");
+                        }
+                    }
+                }
+            });
+
+            midiSetup.registerListener({
+                name: "bluePad5",
+                onBinaryInputNonShifted: function (deck, down, _control, channel) {
+                    var sideState = Beatmixxxx.state.side.fromChannel(channel);
+                    sideState.beatloopSizePressed = sideState.isA() && down;
+                }
             });
         },
 
