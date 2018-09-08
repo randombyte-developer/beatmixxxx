@@ -576,37 +576,13 @@ var Beatmixxxx = {
                     },
 
                     scaleMidiValue: function (value) {
-                        if (!_.isUndefined(this.controlMid)) {
-                            return script.absoluteNonLin(value, this.controlLow, this.controlMid, this.controlHigh, this.midiMin, this.midiMax);
-
-                        } else {
-                            return script.absoluteLin(value, this.controlLow, this.controlHigh, this.midiMin, this.midiMax);
-                        }
+                        return script.absoluteLin(value, 0, 1, 0x00, 0x7F);
                     }
-                };
-
-                var makeLinearSoftTakeoverEntry = function (controlLow, controlHigh, midiMin, midiMax) {
-
-                    var entry = _.clone(defaultSoftTakeoverEntry);
-
-                    if (_.isUndefined(midiMin)) {
-                        midiMin = 0x00;
-                    }
-                    if (_.isUndefined(midiMax)) {
-                        midiMax = 0x7F;
-                    }
-
-                    entry.controlLow = controlLow;
-                    entry.controlHigh = controlHigh;
-                    entry.hardwareMin = midiMin;
-                    entry.hardwareMax = midiMax;
-
-                    return entry;
                 };
 
                 Beatmixxxx.midiInput.softTakeover.list = {
                     "[Master]": {
-                        "crossfader": makeLinearSoftTakeoverEntry(-1, 1)
+                        "crossfader": _.clone(defaultSoftTakeoverEntry)
                     }
                 };
 
@@ -614,19 +590,19 @@ var Beatmixxxx = {
                     engine.softTakeover(deck.group, "rate", true);
 
                     Beatmixxxx.midiInput.softTakeover.list["[EqualizerRack1_" + deck.group + "_Effect1]"] = {
-                        "parameter1": makeLinearSoftTakeoverEntry(0, 1), // low
-                        "parameter2": makeLinearSoftTakeoverEntry(0, 1), // mid
-                        "parameter3": makeLinearSoftTakeoverEntry(0, 1) // high
+                        "parameter1": _.clone(defaultSoftTakeoverEntry), // low
+                        "parameter2": _.clone(defaultSoftTakeoverEntry), // mid
+                        "parameter3": _.clone(defaultSoftTakeoverEntry) // high
                     };
 
 
                     Beatmixxxx.midiInput.softTakeover.list["[QuickEffectRack1_" + deck.group + "]"] = {
-                        "super1": makeLinearSoftTakeoverEntry(0, 1) // filter
+                        "super1": _.clone(defaultSoftTakeoverEntry) // filter
                     };
 
                     Beatmixxxx.midiInput.softTakeover.list[deck.group] = {
-                        "pregain": makeLinearSoftTakeoverEntry(0, 1),
-                        "volume": makeLinearSoftTakeoverEntry(0, 1)
+                        "pregain": _.clone(defaultSoftTakeoverEntry),
+                        "volume": _.clone(defaultSoftTakeoverEntry)
                     };
                 });
 
