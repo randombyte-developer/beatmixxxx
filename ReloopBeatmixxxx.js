@@ -1,9 +1,28 @@
 var Beatmixxxx = {
+
+    // TODO put all used constants in here
     constants: {
+        timings: {
+            readyToPlayBlinkingInterval: 500
+        },
+
         midi: {
             leds: {
+                values: {
+                    ON: 0x7F,
+                    OFF: 0x00,
+
+                    RED: 0x7F,
+                    BLUE: 0x2B,
+                    VIOLET: 0x2A
+                },
+
                 play: {
                     number: 0x23,
+                    offset: 0x40 // shift offset
+                },
+                pads: {
+                    numbers: _.range(0x00, 0x08),
                     offset: 0x40
                 }
             }
@@ -33,14 +52,17 @@ var Beatmixxxx = {
                     setA: function () {
                         this.modeA = true;
                         this.modeB = false;
+                        this.onModeSwitched();
                     },
                     setB: function () {
                         this.modeB = true;
                         this.modeA = false;
+                        this.onModeSwitched();
                     },
                     setAB: function () {
                         this.modeA = true;
                         this.modeB = true;
+                        this.onModeSwitched();
                     },
 
                     isA: function () {
@@ -51,11 +73,19 @@ var Beatmixxxx = {
                     },
                     isAB: function () {
                         return this.modeA === true && this.modeB === true;
+                    },
+
+                    onModeSwitched: function () {
+                        Beatmixxxx.decks.sides.onModeSwitched(this.sideObject);
                     }
                 };
 
-                this.left = _.clone(defaultSideState);
-                this.right = _.clone(defaultSideState);
+                this.left = _.defaults(_.clone(defaultSideState), {
+                    sideObject: Beatmixxxx.decks.sides.left
+                });
+                this.right = _.defaults(_.clone(defaultSideState), {
+                    sideObject: Beatmixxxx.decks.sides.right
+                });
             }
         }
     },
@@ -93,7 +123,7 @@ var Beatmixxxx = {
                     }).first();
             },
 
-            modifierPressed: function (modifier, ledMidiNumber, channel) {
+            onModifierPressed: function (modifier, ledMidiNumber, channel) {
                 var side = Beatmixxxx.decks.sides.fromChannel(channel);
                 side.deck = ((side.deck - 1) ^ modifier) + 1;
 
@@ -103,6 +133,16 @@ var Beatmixxxx = {
 
                 Beatmixxxx.midiInput.softTakeover.onDeckChanged();
                 Beatmixxxx.decks.fromChannel(channel).triggerConnections();
+            },
+
+            onModeSwitched: function (side) {
+                _.forEach(Beatmixxxx.constants.midi.leds.pads.numbers, function (padMidiNumber) {
+                    _.forEach(side.channels, function (channel) {
+                        Beatmixxxx.leds.set(channel, padMidiNumber, false, Beatmixxxx.constants.midi.leds.pads.offset);
+                    });
+                });
+
+                Beatmixxxx.decks[side.deck].triggerConnections();
             }
         },
 
@@ -156,7 +196,12 @@ var Beatmixxxx = {
 
                     deck.connections = _.concat(deck.connections, _.map(_.range(4), function (padIndex) {
                         return deck.makeConnection("hotcue_" + (padIndex + 1) + "_enabled", function (value) {
-                            deck.setLed(padIndex, value, 0x40);
+                            _.forEach(deck.getChannels(), function (channel) {
+                                var side = Beatmixxxx.decks.sides.fromChannel(channel);
+                                if (!_.isUndefined(side) && Beatmixxxx.state.side[side.name].isA()) {
+                                    Beatmixxxx.leds.set(channel, padIndex, value, Beatmixxxx.constants.midi.leds.pads.offset);
+                                }
+                            });
                         });
                     }));
                 },
@@ -335,7 +380,7 @@ var Beatmixxxx = {
                 name: "pitchPlus",
                 noDeck: true,
                 onDownNonShifted: function (_value, control, channel) {
-                    Beatmixxxx.decks.sides.modifierPressed(1, 0x24, channel);
+                    Beatmixxxx.decks.sides.onModifierPressed(1, 0x24, channel);
                 }
             });
 
@@ -343,7 +388,7 @@ var Beatmixxxx = {
                 name: "pitchMinus",
                 noDeck: true,
                 onDownNonShifted: function (_value, control, channel) {
-                    Beatmixxxx.decks.sides.modifierPressed(2, 0x25, channel);
+                    Beatmixxxx.decks.sides.onModifierPressed(2, 0x25, channel);
                 }
             });
 
@@ -419,6 +464,7 @@ var Beatmixxxx = {
                 }
             });
 
+            // TODO handle the A&B mode correctly
             this.registerListener({
                 name: "padModeA",
                 noDeck: true,
@@ -712,15 +758,16 @@ var Beatmixxxx = {
     },
 
     leds: {
-        values: {
-            ON: 0x7F,
-            OFF: 0x00
-        },
+        set: function (channel, control, status, shiftOffset, color) {
+            if (_.isUndefined(color)) {
+                color = Beatmixxxx.constants.midi.leds.values.ON;
+            }
 
-        set: function (channel, control, status, shiftOffset) {
-            midi.sendShortMsg(0x90 + channel, control, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
+            var value = status ? color : Beatmixxxx.constants.midi.leds.values.OFF;
+
+            midi.sendShortMsg(0x90 + channel, control, value);
             if (!_.isUndefined(shiftOffset)) {
-                midi.sendShortMsg(0x90 + channel, control + shiftOffset, Beatmixxxx.leds.values[status ? "ON" : "OFF"]);
+                midi.sendShortMsg(0x90 + channel, control + shiftOffset, value);
             }
         }
     },
@@ -740,13 +787,16 @@ var Beatmixxxx = {
         });
 
         // ready to play, button blinking
-        engine.beginTimer(500, function () {
+        engine.beginTimer(Beatmixxxx.constants.timings.readyToPlayBlinkingInterval, function () {
 
             Beatmixxxx.state.global.playIndicatorLit = !Beatmixxxx.state.global.playIndicatorLit;
+
+            var playLed = Beatmixxxx.constants.midi.leds.play;
+
             _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
                 if (!deck.getValue("play") && deck.getValue("track_loaded")) {
                     _.forEach(deck.getChannels(), function (channel) {
-                        Beatmixxxx.leds.set(channel, 0x23, Beatmixxxx.state.global.playIndicatorLit, 0x40);
+                        Beatmixxxx.leds.set(channel, playLed.number, Beatmixxxx.state.global.playIndicatorLit, playLed.offset);
                     });
                 }
             });
