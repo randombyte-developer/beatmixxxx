@@ -1,4 +1,15 @@
 var Beatmixxxx = {
+    constants: {
+        midi: {
+            leds: {
+                play: {
+                    number: 0x23,
+                    offset: 0x40
+                }
+            }
+        }
+    },
+
     state: {
         global: {
             shifted: false,
@@ -17,6 +28,7 @@ var Beatmixxxx = {
                     modeA: true,
                     modeB: false,
                     beatloopSizePressed: false,
+                    beatjumpSizePressed: false,
 
                     setA: function () {
                         this.modeA = true;
@@ -126,11 +138,18 @@ var Beatmixxxx = {
                 setup: function () {
                     var deck = this;
 
+                    var playLed = Beatmixxxx.constants.midi.leds.play;
+
                     deck.connections = _.concat(deck.connections, [
                         this.makeConnection("pfl", function (value) { Beatmixxxx.leds.set(deck.number, 0x52, value, 0x20); }),
                         this.makeConnection("play", function (value) {
                             if (value) {
-                                Beatmixxxx.leds.set(deck.number, 0x23, true, 0x40);
+                                Beatmixxxx.leds.set(deck.number, playLed.number, true, playLed.offset);
+                            }
+                        }),
+                        this.makeConnection("track_loaded", function (value) {
+                            if (!value) {
+                                Beatmixxxx.leds.set(deck.number, playLed.number, false, playLed.offset);
                             }
                         })
                     ]);
@@ -298,8 +317,8 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "rate",
-                onInput: function (deck, value) {
-                    var rate = script.absoluteLin(value, 1, -1, 0x00, 0x7F);
+                onInput: function (deck, value, control, _channel, status) {
+                    var rate = -script.midiPitch(control, value, status);
                     deck.setValue("rate", rate);
                 }
             });
@@ -418,16 +437,25 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "effectsEncoder",
-                onInputNonShifted: function (deck, value, _control, channel) {
+                onInput: function (deck, value, _control, channel) {
+                    var sideState = Beatmixxxx.state.side.fromChannel(channel);
                     var speed = value - 0x40;
 
-                    if (Beatmixxxx.state.side.fromChannel(channel).beatloopSizePressed) {
+                    if (sideState.beatloopSizePressed) {
                         deck.setValue(speed > 0 ? "loop_double" : "loop_halve");
+                    }
+                    if (sideState.beatjumpSizePressed) {
+                        var beatjumpSize = deck.getValue("beatjump_size");
+                        beatjumpSize = speed > 0 ? beatjumpSize * 2 : beatjumpSize / 2;
+                        beatjumpSize = _.min([_.max([0.03125, beatjumpSize]), 64]); // coerce value
+                        deck.setValue("beatjump_size", beatjumpSize);
                     }
                 }
             });
 
             var midiSetup = this;
+
+            // todo reduce duplicated A&B mode code
 
             _.forEach(_.range(4), function (padIndex) {
                 midiSetup.registerListener({
@@ -471,6 +499,41 @@ var Beatmixxxx = {
                 onBinaryInputNonShifted: function (deck, down, _control, channel) {
                     var sideState = Beatmixxxx.state.side.fromChannel(channel);
                     sideState.beatloopSizePressed = sideState.isA() && down;
+                }
+            });
+
+            midiSetup.registerListener({
+                name: "bluePad6",
+                onBinaryInput: function (deck, down, _control, channel) {
+                    var sideState = Beatmixxxx.state.side.fromChannel(channel);
+                    if (sideState.isA()) {
+                        if (down) {
+                            if (Beatmixxxx.state.global.shifted) {
+                                sideState.beatjumpSizePressed = true;
+                            } else {
+                                deck.setValue("beatjump_backward", true);
+                            }
+                        } else {
+                            sideState.beatjumpSizePressed = false;
+                            deck.setValue("beatjump_backward", false);
+                        }
+                    }
+                }
+            });
+
+            midiSetup.registerListener({
+                name: "bluePad7",
+                onBinaryInput: function (deck, down, _control, channel) {
+                    var sideState = Beatmixxxx.state.side.fromChannel(channel);
+                    if (sideState.isA()) {
+                        if (down) {
+                            if (!Beatmixxxx.state.global.shifted) {
+                                deck.setValue("beatjump_forward", true);
+                            }
+                        } else {
+                            deck.setValue("beatjump_forward", false);
+                        }
+                    }
                 }
             });
         },
@@ -681,7 +744,7 @@ var Beatmixxxx = {
 
             Beatmixxxx.state.global.playIndicatorLit = !Beatmixxxx.state.global.playIndicatorLit;
             _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
-                if (!deck.getValue("play")) {
+                if (!deck.getValue("play") && deck.getValue("track_loaded")) {
                     _.forEach(deck.getChannels(), function (channel) {
                         Beatmixxxx.leds.set(channel, 0x23, Beatmixxxx.state.global.playIndicatorLit, 0x40);
                     });
