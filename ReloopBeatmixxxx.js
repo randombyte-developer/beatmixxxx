@@ -343,7 +343,7 @@ var Beatmixxxx = {
                 canChangePosition: false,
                 led: {
                     midiNumber: 0x50,
-                    behavior: "both"
+                    behavior: "nonShifted"
                 },
                 onDownNonShifted: function (deck) {
                     deck.setValue("LoadSelectedTrack");
@@ -380,6 +380,14 @@ var Beatmixxxx = {
                 noDeck: true,
                 onDownNonShifted: function () {
                     script.toggleControl("[Master]", "maximize_library");
+                }
+            });
+
+            this.registerListener({
+                name: "rightDeckSwitch",
+                noDeck: true,
+                onDownNonShifted: function () {
+                    script.toggleControl("[Master]", "headSplit");
                 }
             });
 
