@@ -390,26 +390,36 @@ var Beatmixxxx = {
                 name: "rightDeckSwitch",
                 noDeck: true,
                 onDown: function () {
-                    var side = Beatmixxxx.decks.sides.left;
+                    var side = Beatmixxxx.decks.sides.right;
                     Beatmixxxx.decks.sides.setDeck(side, 2 == side.deck ? 4 : 2);
                 }
             });
 
             this.registerListener({
-                name: "pitchPlus",
+                name: "back",
                 noDeck: true,
+                canChangePosition: false,
                 onDownNonShifted: function (_value, control, channel) {
+                    script.toggleControl("[Master]", "maximize_library");
+                },
+                onDownShifted: function (_value, control, channel) {
                     script.toggleControl("[Master]", "headSplit");
                 }
             });
 
             this.registerListener({
                 name: "pitchMinus",
-                noDeck: true,
-                onDownNonShifted: function (_value, control, channel) {
-                    script.toggleControl("[Master]", "maximize_library");
+                onDownNonShifted: function (deck) {
+                    deck.toggleValue("quantize");
                 }
             });
+
+            /*this.registerListener({
+                name: "pitchPlus",
+                noDeck: true,
+                onDownNonShifted: function (_value, control, channel) {
+                }
+            });*/
 
             this.registerListener({
                 name: "wheelTouch",
@@ -735,27 +745,6 @@ var Beatmixxxx = {
 
                 _.forEach(Beatmixxxx.decks.getAll(), function (deck) {
                     engine.softTakeover(deck.group, "rate", true);
-
-                    /*Beatmixxxx.midiInput.softTakeover.list["[EqualizerRack1_" + deck.group + "_Effect1]"] = {
-                        "parameter1": _.clone(defaultSoftTakeoverEntry), // low
-                        "parameter2": _.clone(defaultSoftTakeoverEntry), // mid
-                        "parameter3": _.clone(defaultSoftTakeoverEntry) // high
-                    };*/
-
-                    /*Beatmixxxx.midiInput.softTakeover.list["[QuickEffectRack1_" + deck.group + "]"] = {
-                        "super1": _.clone(defaultSoftTakeoverEntry) // filter
-                    };*/
-
-                    /*_.times(3, function (effectIndex) {
-                        Beatmixxxx.midiInput.softTakeover.list["[EffectRack1_EffectUnit" + deck.number + "_Effect" + (effectIndex + 1) + "]"] = {
-                            "meta": _.clone(defaultSoftTakeoverEntry) // normal effect knob
-                        };
-                    });*/
-
-                    /*Beatmixxxx.midiInput.softTakeover.list[deck.group] = {
-                        "pregain": _.clone(defaultSoftTakeoverEntry),
-                        "volume": _.clone(defaultSoftTakeoverEntry)
-                    };*/
                 });
 
                 this.forEachEntry(function (group, parameter, entry) {
