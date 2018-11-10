@@ -181,6 +181,7 @@ var Beatmixxxx = {
                             Beatmixxxx.leds.set(deck.number, 0x04, value, 0x40);
                         }),
                         this.makeConnection("pfl", function (value) { Beatmixxxx.leds.set(deck.number, 0x52, value, 0x20); }),
+                        this.makeConnection("quantize", function (value) { Beatmixxxx.leds.set(deck.number, 0x25, value, 0x40); }),
                         this.makeConnection("play", function (value) {
                             if (value) {
                                 Beatmixxxx.leds.set(deck.number, playLed.number, true, playLed.offset);
@@ -322,8 +323,11 @@ var Beatmixxxx = {
             this.registerListener({
                 name: "traxRotate",
                 noDeck: true,
-                onInputNonShifted: function (value) {
+                onInput: function (value) {
                     var speed = value - Beatmixxxx.midiInput.values.ENCODER_OFFSET;
+                    if (Beatmixxxx.state.global.shifted) {
+                        speed *= 5;
+                    }
                     engine.setValue("[Library]", "MoveVertical", speed);
                 }
             });
@@ -414,12 +418,12 @@ var Beatmixxxx = {
                 }
             });
 
-            /*this.registerListener({
+            this.registerListener({
                 name: "pitchPlus",
                 noDeck: true,
                 onDownNonShifted: function (_value, control, channel) {
                 }
-            });*/
+            });
 
             this.registerListener({
                 name: "wheelTouch",
