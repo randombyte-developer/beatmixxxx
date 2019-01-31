@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='utf-8'?>
+<MixxxControllerPreset schemaVersion="1" mixxxVersion="">
+    <info>
+        <name>MT</name>
+        <author>RandomByte</author>
+        <description>An experimental mapping for QLC+</description>
+    </info>
+    <controller id="Midi">
+        <scriptfiles>
+            <file filename="lodash-4.17.10.js" functionprefix=""/>
+            <file filename="Midi_Through.js" functionprefix="MT"/>
+        </scriptfiles>
+        <controls/>
+        <outputs/>
+    </controller>
+</MixxxControllerPreset>
