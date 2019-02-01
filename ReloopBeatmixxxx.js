@@ -413,16 +413,19 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "pitchMinus",
-                onDownNonShifted: function (deck) {
+                onDownNonShifted: function () {
+					engine.setValue("[Sampler1]", "volume", 1); // move preset selection to previous
+				},
+                onDownShifted: function (deck) {
                     deck.toggleValue("quantize");
                 }
             });
 
             this.registerListener({
                 name: "pitchPlus",
-                noDeck: true,
-                onDownNonShifted: function (_value, control, channel) {
-                }
+                onDownNonShifted: function () {
+					engine.setValue("[Sampler2]", "volume", 1); // move preset selection to next
+				}
             });
 
             this.registerListener({
@@ -551,16 +554,7 @@ var Beatmixxxx = {
                         beatjumpSize = speed > 0 ? beatjumpSize * 2 : beatjumpSize / 2;
                         beatjumpSize = _.min([_.max([0.03125, beatjumpSize]), 64]); // coerce value
                         deck.setValue("beatjump_size", beatjumpSize);
-                    } else if (!Beatmixxxx.state.global.shifted) {
-						var direction = speed > 0 ? 1 : 0;
-
-						var isLeft = (deck.number % 2) != 0;
-						if (isLeft) {
-							engine.setValue("[Sampler1]", "volume", direction); // move fixture selection
-						} else {
-							engine.setValue("[Sampler2]", "volume", direction); // move fixture selection
-						}
-					}
+                    }
                 }
             });
 

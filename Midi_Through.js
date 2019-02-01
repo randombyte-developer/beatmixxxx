@@ -1,10 +1,10 @@
 var MT = {};
 
 MT.sendMidi = function (signal) {
+	signal -= 129; // that's where QLC's "midi internal channels" begin
 	midi.sendShortMsg(0x90, signal, 127);
 	engine.beginTimer(100, function() {
 		midi.sendShortMsg(0x90, signal, 0);
-		print(signal + 129);
 	}, true); // one-shot timer to turn the "button-press" off
 };
 
@@ -43,60 +43,65 @@ MT.altColor = function (colorInterval) {
 MT.fixtures = [
 	{
 		name: "Pars",
-		states: [
-			MT.noMidi,
-			MT.once(1), // Aus, QLC channel 130
-			MT.once(2), // Fade
-			MT.altColor(16),
-			MT.altColor(8),
-			MT.altColor(4),
-			MT.altColor(2),
-			MT.altColor(1),
-		],
-		state: 3,
-		onceSent: false, // if the midi was already sent in the 'once' mode
 		colors: [
-			[3, 4], // Bunt
-			[5, 6], // Warm
-			[7, 8] // Kalt
-		],
-		color: 0
+			[132, 133], // Bunt
+			[134, 135], // Warm
+			[136, 137] // Kalt
+		]
+	},
+	{
+		name: "Led Bars",
+		colors: [
+			[150, 151], // Bunt
+			[152, 153], // Warm
+			[154, 155] // Kalt
+		]
 	},
 	{
 		name: "Quads",
-		states: [
-			MT.noMidi,
-			MT.once(21), // Aus, beide Aus-Buttons auf Midi 21
-			MT.altColorAndMove(8, 0, 16),
-			MT.altColorAndMove(4, 0, 16),
-			MT.altColorAndMove(8, 1, 8),
-			MT.altColorAndMove(4, 1, 8),
-			MT.altColorAndMove(1, 1, 8),
-			MT.altColorAndMove(4, 1, 4),
-			MT.altColorAndMove(2, 1, 4),
-			MT.altColorAndMove(4, 2, 8),
-			MT.altColorAndMove(2, 2, 8),
-			MT.altColorAndMove(4, 2, 4),
-			MT.altColorAndMove(2, 2, 4),
-			MT.altColorAndMove(1, 2, 4)
-		],
-		state: 3,
-		onceSent: false, // if the midi was already sent in the 'once' mode
 		colors: [
-			[9, 10], // Bunt, 138, 139
-			[11, 12], // Warm 140, 141
-			[13, 14] // Kalt 142, 143
+			[138, 139], // Bunt
+			[140, 141], // Warm
+			[142, 143] // Kalt
 		],
-		color: 0,
 		moves: [
-			[15, 16], // Chill, 144, 145
-			[17, 18], // Normal 146, 147
-			[19, 20] // Speed 148, 149
+			[144, 145], // Chill
+			[146, 147], // Normal
+			[148, 149] // Speed
+		]
+	},
+	{
+		name: "Scanner",
+		colors: [
+			[156, 157], // Bunt
+			[158, 159], // Warm
+			[160, 161] // Kalt
+		],
+		moves: [
+			[162, 163] // Punkte
 		]
 	}
 ];
 
-MT.currentFixture = 0;
+// some presets to be used during live performance, which consist of the declared states above
+// pars, led bars, quads -> that's the order from the MT.fixtures array
+MT.presetStates = [
+	MT.noMidi, // that's for all fixtures
+	[MT.once(131), 		MT.altColor(16),	MT.altColorAndMove(8, 0, 16),	MT.altColorAndMove(16, 0, 8)],
+	[MT.altColor(8), 	MT.altColor(8), 	MT.altColorAndMove(8, 0, 16), 	MT.altColorAndMove(8, 0, 8)],
+	[MT.altColor(8), 	MT.altColor(8), 	MT.altColorAndMove(8, 1, 16), 	MT.altColorAndMove(8, 0, 8)],
+	[MT.altColor(8), 	MT.altColor(8), 	MT.altColorAndMove(8, 1, 8), 	MT.altColorAndMove(4, 0, 4)],
+	[MT.altColor(4), 	MT.altColor(8), 	MT.altColorAndMove(4, 1, 8),	MT.altColorAndMove(4, 0, 4)],
+	[MT.altColor(4), 	MT.altColor(4), 	MT.altColorAndMove(4, 1, 4), 	MT.altColorAndMove(4, 0, 4)],
+	[MT.altColor(2), 	MT.altColor(4), 	MT.altColorAndMove(4, 1, 4), 	MT.altColorAndMove(4, 0, 4)],
+	[MT.altColor(2), 	MT.altColor(2), 	MT.altColorAndMove(2, 2, 4), 	MT.altColorAndMove(2, 0, 4)],
+	[MT.altColor(1), 	MT.altColor(2), 	MT.altColorAndMove(2, 2, 4), 	MT.altColorAndMove(2, 0, 2)],
+	[MT.altColor(1), 	MT.altColor(1), 	MT.altColorAndMove(1, 2, 2), 	MT.altColorAndMove(2, 0, 2)]
+];
+
+MT.currentPresetState = 1;
+MT.currentColor = 0;
+MT.onceSent = false; // if the midi was already sent when activated; this is reset when the preset is changed
 
 MT.shouldSendMidi = function (interval) {
 	return (MT.beat % interval) == 0;
@@ -110,16 +115,22 @@ MT.getAlternating = function (interval) {
 MT.beat = 1;
 MT.onBeat = function () {
 	MT.beat = (MT.beat + 1) % 64; // wrap around after 64 beats
-	_.forEach(MT.fixtures, function (fixture) {
-		var state = fixture.states[fixture.state];
-		if (state == MT.noMidi) {
-			// no midi
-		} else if (state.once && !fixture.onceSent) {
+
+	var presetState = MT.presetStates[MT.currentPresetState];
+
+	if (presetState == MT.noMidi) {
+		// nothing
+		return
+	}
+
+	_.forEach(MT.fixtures, function (fixture, key) {
+		var state = presetState[key];
+
+		if (state.once && !MT.onceSent) {
 			MT.sendMidi(state.midi);
-			fixture.onceSent = true;
 		} else {
 			if (MT.shouldSendMidi(state.colorInterval)) {
-				var colors = fixture.colors[fixture.color];
+				var colors = fixture.colors[MT.currentColor];
 				var alternatingIndex = MT.getAlternating(state.colorInterval)
 				var midiColor = colors[alternatingIndex];
 				MT.sendMidi(midiColor);
@@ -132,36 +143,48 @@ MT.onBeat = function () {
 			}
 		}
 	});
+
+	// after a preset change, onceSent is set to false
+	// the next beat will definitly trigger all midi signals because the beat was reset
+	// so after those midi signals were sent, we can set onceSent to false
+	MT.onceSent = true;
 };
 
+MT.movePresetStateIndex = function (direction) {
+	MT.currentPresetState = _.clamp(MT.currentPresetState + direction, 0, MT.presetStates.length - 1);
+	MT.beat = -1; // reset beat counter, the next beat is the first (MT.beat = 0), which triggers all midi signals
+	MT.onceSent = false;
+};
+
+MT.resetSamplerVolume = function (samplerNum) {
+	engine.setValue("[Sampler" + samplerNum + "]", "volume", 0); // reset the value ourselves to indicate that we read it
+}
+
 MT.init = function () {
-	print("Hello there from the through port!");
+	print("Hello there from the Through port!");
 
-	// change fixture selection
-	engine.makeConnection("[Sampler1]", "volume", function (direction) {
-		if (direction == 0.5) {
+	MT.resetSamplerVolume(1);
+	MT.resetSamplerVolume(2);
+
+	// previous preset
+	engine.makeConnection("[Sampler1]", "volume", function (pressed) {
+		if (pressed != 1) {
 			return;
 		}
-
-		MT.currentFixture = _.clamp(MT.currentFixture + (direction > 0 ? 1 : -1), 0, MT.fixtures.length - 1);
-
-		engine.setValue("[Sampler1]", "volume", 0.5); // force throwing an event when the value is set to 0 or 1 in the other script
+		MT.movePresetStateIndex(-1);
+		MT.resetSamplerVolume(1);
 	});
 
-	// change fixture state
-	engine.makeConnection("[Sampler2]", "volume", function (direction) {
-		if (direction == 0.5) {
+	// next preset
+	engine.makeConnection("[Sampler2]", "volume", function (pressed) {
+		if (pressed != 1) {
 			return;
 		}
-
-		var fixture = MT.fixtures[MT.currentFixture];
-		fixture.state = _.clamp(fixture.state + (direction > 0 ? 1 : -1), 0, fixture.states.length - 1);
-		fixture.onceSent = false;
-		MT.beat = -1;
-
-		engine.setValue("[Sampler2]", "volume", 0.5);
+		MT.movePresetStateIndex(+1);
+		MT.resetSamplerVolume(2);
 	});
 
+	// figure out which deck is giving the beat
 	engine.makeConnection("[Master]", "crossfader", function (crossfader) {
 		var baseDeck = crossfader < 0 ? 1 : 2;
 
@@ -169,11 +192,11 @@ MT.init = function () {
 		var vol2 = engine.getParameter(MT.ch(baseDeck + 2), "volume");
 
 		MT.currentDeck = baseDeck + (vol1 > vol2 ? 0 : 2);
-		print(MT.currentDeck);
 	});
 
+	// connect to each of the four deck's beat, but only actually use it when the deck is the active/main one
 	_.times(4, function (deck) {
-		deck += 1;
+		deck += 1; // because 0/1-indexed
 		engine.makeConnection(MT.ch(deck), "beat_active", function(value) {
 			if (value == 1 && deck == MT.currentDeck) {
 				MT.onBeat();
