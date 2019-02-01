@@ -558,6 +558,24 @@ var Beatmixxxx = {
                 }
             });
 
+			this.registerListener({
+				name: "effectsButton",
+				onBinaryInputNonShifted: function (deck, down) {
+					var isLeft = Beatmixxxx.decks.sides.fromChannel(deck.number).name === "left";
+					var samplerNum = isLeft ? 3 : 4;
+					engine.setValue("[Sampler" + samplerNum + "]", "volume", down ? 1 : 0);
+				}
+			});
+
+			this.registerListener({
+                name: "samplerVolume",
+				noDeck: true,
+                canChangePosition: false,
+                onInput: function (value) {
+                    engine.setValue("[Sampler5]", "volume", Beatmixxxx.midiInput.scaleMidiValue(value));
+                }
+            });
+
             // todo reduce duplicated A&B mode code
 
             _.forEach(_.range(4), function (padIndex) {

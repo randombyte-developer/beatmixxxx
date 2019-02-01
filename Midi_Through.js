@@ -1,11 +1,18 @@
 var MT = {};
 
-MT.sendMidi = function (signal) {
+MT.sendMidi = function (signal, explicitValue) {
+
 	signal -= 129; // that's where QLC's "midi internal channels" begin
-	midi.sendShortMsg(0x90, signal, 127);
-	engine.beginTimer(100, function() {
-		midi.sendShortMsg(0x90, signal, 0);
-	}, true); // one-shot timer to turn the "button-press" off
+	var simulateButtonPress = _.isUndefined(explicitValue);
+
+	if (simulateButtonPress) {
+		midi.sendShortMsg(0x90, signal, 127);
+		engine.beginTimer(10, function() {
+			midi.sendShortMsg(0x90, signal, 0);
+		}, true); // one-shot timer to turn the "button-press" off
+	} else {
+		midi.sendShortMsg(0x90, signal, explicitValue);
+	}
 };
 
 MT.currentDeck = 1;
@@ -13,6 +20,10 @@ MT.currentDeck = 1;
 MT.ch = function (deckNumber) {
 	return "[Channel" + deckNumber + "]";
 };
+
+MT.scaleFromMidiValue = function (value) {
+    return script.absoluteLin(value, 0x00, 0x7F, 0, 1);
+}
 
 MT.noMidi = {
 	noMidi: true
@@ -93,15 +104,18 @@ MT.presetStates = [
 	[MT.altColor(8), 	MT.altColor(8), 	MT.altColorAndMove(8, 1, 8), 	MT.altColorAndMove(4, 0, 4)],
 	[MT.altColor(4), 	MT.altColor(8), 	MT.altColorAndMove(4, 1, 8),	MT.altColorAndMove(4, 0, 4)],
 	[MT.altColor(4), 	MT.altColor(4), 	MT.altColorAndMove(4, 1, 4), 	MT.altColorAndMove(4, 0, 4)],
-	[MT.altColor(2), 	MT.altColor(4), 	MT.altColorAndMove(4, 1, 4), 	MT.altColorAndMove(4, 0, 4)],
-	[MT.altColor(2), 	MT.altColor(2), 	MT.altColorAndMove(2, 2, 4), 	MT.altColorAndMove(2, 0, 4)],
+	[MT.altColor(2), 	MT.altColor(4), 	MT.altColorAndMove(4, 1, 4), 	MT.altColorAndMove(4, 0, 2)],
+	[MT.altColor(2), 	MT.altColor(2), 	MT.altColorAndMove(2, 2, 4), 	MT.altColorAndMove(2, 0, 2)],
 	[MT.altColor(1), 	MT.altColor(2), 	MT.altColorAndMove(2, 2, 4), 	MT.altColorAndMove(2, 0, 2)],
-	[MT.altColor(1), 	MT.altColor(1), 	MT.altColorAndMove(1, 2, 2), 	MT.altColorAndMove(2, 0, 2)]
+	[MT.altColor(1), 	MT.altColor(1), 	MT.altColorAndMove(1, 2, 2), 	MT.altColorAndMove(2, 0, 1)]
 ];
 
 MT.currentPresetState = 1;
+MT.presetStateBeforeStrobe = 3;
 MT.currentColor = 0;
 MT.onceSent = false; // if the midi was already sent when activated; this is reset when the preset is changed
+MT.blackout = false; // tracks the in-QLC+ value if blackout is activated, sadly it can't be set to a "flash button"
+MT.strobe = { slow: false, fast: false };
 
 MT.shouldSendMidi = function (interval) {
 	return (MT.beat % interval) == 0;
@@ -182,6 +196,54 @@ MT.init = function () {
 		}
 		MT.movePresetStateIndex(+1);
 		MT.resetSamplerVolume(2);
+	});
+
+	// stobe slow
+	engine.makeConnection("[Sampler3]", "volume", function (pressedNum) {
+		var pressed = (pressedNum == 1 ? true : false);
+
+		// we have to track the in-QLC+ status of the strobe, because it can't be a flash scene
+		if (MT.strobe.slow != pressed) {
+			if (pressed) {
+				MT.presetStateBeforeStrobe = MT.currentPresetState;
+				MT.currentPresetState = 0;
+			} else {
+				MT.currentPresetState = MT.presetStateBeforeStrobe;
+			}
+			MT.sendMidi(164);
+			print("Slow active: " + pressed);
+			MT.strobe.slow = pressed;
+		}
+	});
+
+	// strobe fast
+	engine.makeConnection("[Sampler4]", "volume", function (pressedNum) {
+		var pressed = (pressedNum == 1 ? true : false);
+
+		if (MT.strobe.fast != pressed) {
+			if (pressed) {
+				MT.presetStateBeforeStrobe = MT.currentPresetState;
+				MT.currentPresetState = 0;
+			} else {
+				MT.currentPresetState = MT.presetStateBeforeStrobe;
+			}
+			MT.sendMidi(165);
+			print("Fast active: " + pressed);
+			MT.strobe.fast = pressed;
+		}
+	});
+
+	// light intensity & blackout
+	engine.makeConnection("[Sampler5]", "volume", function (value) {
+		var faderDown = (value == 0);
+
+		if (faderDown != MT.blackout) {
+			MT.sendMidi(166);
+				MT.blackout = faderDown;
+		}
+		if (!faderDown) {
+			MT.sendMidi(167, MT.scaleFromMidiValue(value));
+		}
 	});
 
 	// figure out which deck is giving the beat
