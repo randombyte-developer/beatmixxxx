@@ -54,6 +54,7 @@ MT.altColor = function (colorInterval) {
 MT.fixtures = [
 	{
 		name: "Pars",
+		off: 130,
 		colors: [
 			[132, 133], // Bunt
 			[134, 135], // Warm
@@ -62,6 +63,7 @@ MT.fixtures = [
 	},
 	{
 		name: "Led Bars",
+		off: 168,
 		colors: [
 			[150, 151], // Bunt
 			[152, 153], // Warm
@@ -70,6 +72,7 @@ MT.fixtures = [
 	},
 	{
 		name: "Quads",
+		off: 169,
 		colors: [
 			[138, 139], // Bunt
 			[140, 141], // Warm
@@ -83,6 +86,7 @@ MT.fixtures = [
 	},
 	{
 		name: "Scanner",
+		off: 170,
 		colors: [
 			[156, 157], // Bunt
 			[158, 159], // Warm
@@ -95,7 +99,7 @@ MT.fixtures = [
 ];
 
 // some presets to be used during live performance, which consist of the declared states above
-// pars, led bars, quads -> that's the order from the MT.fixtures array
+// pars, led bars, quads, scanner -> that's the order from the MT.fixtures array
 MT.presetStates = [
 	MT.noMidi, // that's for all fixtures
 	[MT.once(131), 		MT.altColor(16),	MT.altColorAndMove(8, 0, 16),	MT.altColorAndMove(16, 0, 8)],
@@ -110,8 +114,22 @@ MT.presetStates = [
 	[MT.altColor(1), 	MT.altColor(1), 	MT.altColorAndMove(1, 2, 2), 	MT.altColorAndMove(2, 0, 1)]
 ];
 
+// pars, led bars, quads, scanner
+MT.fixtureFilters = [
+	[1, 0, 0, 0],
+	[0, 1, 0, 0],
+	[0, 0, 1, 0],
+	[0, 0, 0, 1],
+	[1, 1, 0, 0],
+	[0, 1, 1, 0],
+	[0, 1, 0, 1],
+	[1, 1, 0, 1],
+	[1, 1, 1, 1]
+];
+
 MT.currentPresetState = 1;
 MT.presetStateBeforeStrobe = 3;
+MT.currentFixtureFilter = MT.fixtureFilters.length - 1;
 MT.currentColor = 0;
 MT.onceSent = false; // if the midi was already sent when activated; this is reset when the preset is changed
 MT.blackout = false; // tracks the in-QLC+ value if blackout is activated, sadly it can't be set to a "flash button"
@@ -126,11 +144,17 @@ MT.getAlternating = function (interval) {
 	return (((MT.beat / interval) % 2) == 0) ? 1 : 0;
 };
 
+MT.forceMidiSendOnNextBeat = function () {
+	MT.beat = -1;
+	MT.onceSent = false;
+};
+
 MT.beat = 1;
 MT.onBeat = function () {
 	MT.beat = (MT.beat + 1) % 64; // wrap around after 64 beats
 
 	var presetState = MT.presetStates[MT.currentPresetState];
+	var filters = MT.fixtureFilters[MT.currentFixtureFilter];
 
 	if (presetState == MT.noMidi) {
 		// nothing
@@ -138,6 +162,15 @@ MT.onBeat = function () {
 	}
 
 	_.forEach(MT.fixtures, function (fixture, key) {
+		var filter = filters[key];
+		if (filter == 0) { // I don't trust these JS truthy values lol
+			if (!MT.onceSent) {
+				MT.sendMidi(fixture.off);
+			}
+
+			return true; // continue
+		}
+
 		var state = presetState[key];
 
 		if (state.once && !MT.onceSent) {
@@ -166,8 +199,12 @@ MT.onBeat = function () {
 
 MT.movePresetStateIndex = function (direction) {
 	MT.currentPresetState = _.clamp(MT.currentPresetState + direction, 0, MT.presetStates.length - 1);
-	MT.beat = -1; // reset beat counter, the next beat is the first (MT.beat = 0), which triggers all midi signals
-	MT.onceSent = false;
+	MT.forceMidiSendOnNextBeat(); // reset beat counter, the next beat is the first (MT.beat = 0), which triggers all midi signals
+};
+
+MT.moveFixtureFilterIndex = function (direction) {
+	MT.currentFixtureFilter = _.clamp(MT.currentFixtureFilter + direction, 0, MT.fixtureFilters.length - 1);
+	MT.forceMidiSendOnNextBeat();
 };
 
 MT.resetSamplerVolume = function (samplerNum) {
@@ -177,28 +214,34 @@ MT.resetSamplerVolume = function (samplerNum) {
 MT.init = function () {
 	print("Hello there from the Through port!");
 
-	MT.resetSamplerVolume(1);
-	MT.resetSamplerVolume(2);
-
-	// previous preset
-	engine.makeConnection("[Sampler1]", "volume", function (pressed) {
-		if (pressed != 1) {
-			return;
-		}
-		MT.movePresetStateIndex(-1);
-		MT.resetSamplerVolume(1);
+	_.times(9, function (i) {
+		MT.resetSamplerVolume(i + 1);
 	});
 
-	// next preset
-	engine.makeConnection("[Sampler2]", "volume", function (pressed) {
-		if (pressed != 1) {
-			return;
-		}
-		MT.movePresetStateIndex(+1);
-		MT.resetSamplerVolume(2);
+	// previous & next preset
+	_.forEach({ 1: -1, 2: +1 }, function (direction, samplerNum) {
+		engine.makeConnection("[Sampler" + samplerNum + "]", "volume", function (pressed) {
+			if (pressed != 1) {
+				return;
+			}
+			MT.movePresetStateIndex(direction);
+			MT.resetSamplerVolume(samplerNum);
+		});
 	});
 
-	// stobe slow
+	// previous & next fixture filter
+	_.forEach({ 6: -1, 7: +1 }, function (direction, samplerNum) {
+		engine.makeConnection("[Sampler" + samplerNum + "]", "volume", function (pressed) {
+			if (pressed != 1) {
+				return;
+			}
+
+			MT.moveFixtureFilterIndex(direction);
+			MT.resetSamplerVolume(samplerNum);
+		});
+	});
+
+	// strobe slow
 	engine.makeConnection("[Sampler3]", "volume", function (pressedNum) {
 		var pressed = (pressedNum == 1 ? true : false);
 
@@ -211,8 +254,8 @@ MT.init = function () {
 				MT.currentPresetState = MT.presetStateBeforeStrobe;
 			}
 			MT.sendMidi(164);
-			print("Slow active: " + pressed);
 			MT.strobe.slow = pressed;
+			MT.forceMidiSendOnNextBeat();
 		}
 	});
 
@@ -228,8 +271,8 @@ MT.init = function () {
 				MT.currentPresetState = MT.presetStateBeforeStrobe;
 			}
 			MT.sendMidi(165);
-			print("Fast active: " + pressed);
 			MT.strobe.fast = pressed;
+			MT.forceMidiSendOnNextBeat();
 		}
 	});
 
@@ -244,6 +287,18 @@ MT.init = function () {
 		if (!faderDown) {
 			MT.sendMidi(167, MT.scaleFromMidiValue(value));
 		}
+	});
+
+	// strict scene control & automatic scene advancing
+	_.forEach({ 8: 171, 9: 172 }, function (midi, samplerNum) {
+		engine.makeConnection("[Sampler" + samplerNum + "]", "volume", function (pressed) {
+			if (pressed != 1) {
+				return;
+			}
+
+			MT.sendMidi(midi, 127); // weird QLC+ thing that it can't be a normal button press, but has to stay at the DMX-high level
+			MT.resetSamplerVolume(samplerNum);
+		});
 	});
 
 	// figure out which deck is giving the beat

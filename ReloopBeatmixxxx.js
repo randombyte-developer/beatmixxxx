@@ -413,8 +413,11 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "pitchMinus",
-                onDownNonShifted: function () {
-					engine.setValue("[Sampler1]", "volume", 1); // move preset selection to previous
+                onDownNonShifted: function (deck) {
+					var isLeft = Beatmixxxx.decks.sides.fromChannel(deck.number).name === "left";
+					var samplerNum = (isLeft ? 1 : 6);
+					// move preset selection to previous, or decrease activated lights
+					engine.setValue("[Sampler" + samplerNum + "]", "volume", 1);
 				},
                 onDownShifted: function (deck) {
                     deck.toggleValue("quantize");
@@ -423,8 +426,11 @@ var Beatmixxxx = {
 
             this.registerListener({
                 name: "pitchPlus",
-                onDownNonShifted: function () {
-					engine.setValue("[Sampler2]", "volume", 1); // move preset selection to next
+                onDownNonShifted: function (deck) {
+					var isLeft = Beatmixxxx.decks.sides.fromChannel(deck.number).name === "left";
+					var samplerNum = (isLeft ? 2 : 7);
+					// move preset selection to next, or increase activated lights
+					engine.setValue("[Sampler" + samplerNum + "]", "volume", 1);
 				}
             });
 
@@ -564,6 +570,11 @@ var Beatmixxxx = {
 					var isLeft = Beatmixxxx.decks.sides.fromChannel(deck.number).name === "left";
 					var samplerNum = isLeft ? 3 : 4;
 					engine.setValue("[Sampler" + samplerNum + "]", "volume", down ? 1 : 0);
+				},
+				onDownShifted: function (deck) {
+					var isLeft = Beatmixxxx.decks.sides.fromChannel(deck.number).name === "left";
+					var samplerNum = isLeft ? 8 : 9;
+					engine.setValue("[Sampler" + samplerNum + "]", "volume", 1);
 				}
 			});
 
